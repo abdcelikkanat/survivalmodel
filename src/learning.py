@@ -8,7 +8,7 @@ import utils
 
 class LearningModel(BaseModel, torch.nn.Module):
 
-    def __init__(self, data, nodes_num, bins_num, dim, k=10, directed = False,
+    def __init__(self, data: tuple, nodes_num: int, bins_num: int, dim: int, k=10, prior_lambda: float = 1e4, directed = False,
                  lr: float = 0.1, batch_size: int = None, epoch_num: int = 100, steps_per_epoch=10, 
                  device: torch.device = None, verbose: bool = False, seed: int = 19):
 
@@ -25,12 +25,12 @@ class LearningModel(BaseModel, torch.nn.Module):
                 torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False),
                 torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False) if directed else None,
             ),
-            prior_lambda=1.0*1e4,
-            prior_sigma=1.0,
-            prior_B_x0_c=1.0,
-            prior_B_ls=1.0,
-            prior_C_Q=torch.rand(size=(nodes_num, k), device=device),
-            prior_R_factor_inv=None,
+            prior_lambda=torch.as_tensor(prior_lambda, dtype=torch.float, device=device),
+            prior_sigma=(torch.ones(1, ), torch.ones(1, )), #(torch.randn(size=(1, ), device=device), torch.randn(size=(1, ), device=device) if directed else None),
+            prior_B_x0_c=(torch.ones(1, ), torch.ones(1, )), #(torch.rand(size=(1, ), device=device)+1, torch.rand(size=(1, ), device=device) if directed else None),
+            prior_B_ls=(torch.ones(1, ), torch.ones(1, )), #(torch.rand(size=(1, ), device=device)+1, torch.rand(size=(1, ), device=device) if directed else None),
+            prior_C_Q=(torch.rand(size=(nodes_num, k), device=device), torch.rand(size=(nodes_num, k), device=device) if directed else None),
+            prior_R_factor_inv=(None, None),
             init_states=torch.nn.Parameter(torch.zeros(size=((nodes_num-1)*nodes_num//2, ), device=device), requires_grad=False),
             bins_num=bins_num,
             directed=directed,
@@ -97,10 +97,6 @@ class LearningModel(BaseModel, torch.nn.Module):
         border_times = border_times[sorted_indices]
         is_event = is_event[sorted_indices]
 
-        # print(border_times)
-        # print(border_pairs)
-        # print(is_event)
-
         #### FIX - FIX - FIX ####
         mat_row_indices = utils.pairIdx2flatIdx(border_pairs[0], border_pairs[1], n=self.get_nodes_num()).type(torch.long)
         counts = [0]*self.get_pairs_num() #torch.zeros(self.number_of_pairs(), dtype=torch.long, device=self.get_device())
@@ -133,73 +129,6 @@ class LearningModel(BaseModel, torch.nn.Module):
         # raise Exception("STOP")
 
         return sparse_border_mat, mat_pairs, border_pairs, border_times, is_event, states, delta_t, max_row_len
-    # def __initialize(self, data):
-    #     '''
-    #     Compute the model variables
-
-    #     :param data: A tuple of (pairs, times, states)
-    #     '''
-
-    #     pairs, times, states = data
-
-    #     pairs = torch.as_tensor(pairs, dtype=torch.long, device=self.get_device()).T
-    #     times = torch.as_tensor(times, dtype=torch.float, device=self.get_device())
-
-    #     # Add the bin times for each pair and reconstruct the pairs and times tensors
-    #     border_pairs = torch.hstack((
-    #         torch.repeat_interleave(torch.triu_indices(
-    #             self.get_number_of_nodes(), self.get_number_of_nodes(), offset=1, dtype=torch.long, device=self.get_device()
-    #         ), repeats=self.get_bins_num(), dim=1),
-    #         pairs
-    #     ))
-    #     border_times = torch.hstack((
-    #         self.get_bins_bounds()[:-1].unsqueeze(0).expand(self.number_of_pairs(), self.get_bins_num()).flatten(),
-    #         times
-    #     ))
-
-    #     # Construct a tensor indicating if the corresponding time is an event/link or not
-    #     is_event = torch.hstack((
-    #         torch.zeros(len(border_times)-len(times),  dtype=torch.bool, device=self.get_device()),
-    #         torch.ones_like(times, dtype=torch.bool, device=self.get_device())
-    #     ))
-
-    #     # Sort all pairs, times and is_event vector
-    #     sorted_indices = torch.argsort(border_times)
-    #     border_pairs = border_pairs[:, sorted_indices]
-    #     border_times = border_times[sorted_indices]
-    #     is_event = is_event[sorted_indices]
-
-    #     #### FIX - FIX - FIX ####
-    #     mat_row_indices = utils.pairIdx2flatIdx(border_pairs[0], border_pairs[1], n=self.get_number_of_nodes()).type(torch.long)
-    #     counts = [0]*self.number_of_pairs() #torch.zeros(self.number_of_pairs(), dtype=torch.long, device=self.get_device())
-    #     mat_col_indices = []
-    #     for r in mat_row_indices:
-    #         mat_col_indices.append(counts[r])
-    #         counts[r] += 1
-    #     mat_col_indices = torch.as_tensor(mat_col_indices, dtype=torch.long, device=self.get_device())
-    #     max_row_len = max(counts) + 1
-    #     mat_pairs = torch.vstack((mat_row_indices, mat_col_indices))
-    #     #### FIX - FIX - FIX ####
-
-    #     # Find the corresponding border times of the chosen times
-    #     sparse_border_mat = torch.sparse_coo_tensor(mat_pairs, values=border_times, size=(self.number_of_pairs(), max_row_len))
-
-    #     states = torch.sparse.mm(
-    #         torch.sparse_coo_tensor(mat_pairs, values=is_event.type(torch.int), size=(self.number_of_pairs(), max_row_len)), 
-    #         torch.triu(torch.ones(size=(max_row_len, max_row_len), dtype=torch.int, device=self.get_device()), diagonal=0)
-    #     )[mat_row_indices, mat_col_indices]
-    #     states[states % 2 == 0] = 0
-    #     states[states > 0] = 1
-
-    #     delta_t = torch.sparse.mm(
-    #         torch.sparse_coo_tensor(mat_pairs, values=border_times, size=(self.number_of_pairs(), max_row_len)), 
-    #         -torch.diag(torch.ones(max_row_len, dtype=torch.float, device=self.get_device()), diagonal=0) + 
-    #         torch.diag(torch.ones(max_row_len-1, dtype=torch.float, device=self.get_device()), diagonal=-1) 
-    #     )[mat_row_indices, mat_col_indices]
-    #     delta_t[delta_t < 0] = self.get_last_time() + delta_t[delta_t < 0]
-
-    #     return sparse_border_mat, mat_pairs, border_pairs, border_times, is_event, states, delta_t, max_row_len
-
 
     def __set_gradients(self, beta_grad=None, x0_grad=None, v_grad=None, prior_grad=None):
         '''
