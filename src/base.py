@@ -9,10 +9,11 @@ class BaseModel(torch.nn.Module):
     Description
     '''
     def __init__(self, x0: tuple, v: tuple, beta: tuple, 
+                bins_num: int = 100, directed = True, init_states: torch.BoolTensor = None, 
                 prior_lambda: float = 1.0, prior_sigma: float = 1.0, 
-                prior_B_x0_c: float = 1.0, prior_B_ls: float = 1.0, prior_C_Q: torch.Tensor = None,
-                init_states: torch.BoolTensor = None, bins_num: int = 100, directed = True,
-                device: torch.device = "cpu", verbose: bool = False, seed: int = 0, **kwargs):
+                prior_B_x0_c: float = 1.0, prior_B_ls: float = 1.0, 
+                prior_C_Q: torch.Tensor = None, prior_R_factor_inv: torch.Tensor = None,
+                device: torch.device = "cpu", verbose: bool = False, seed: int = 0):
 
         super(BaseModel, self).__init__()
 
@@ -34,6 +35,7 @@ class BaseModel(torch.nn.Module):
         self.__prior_B_x0_c = prior_B_x0_c
         self.__prior_B_ls = prior_B_ls
         self.__prior_C_Q = prior_C_Q
+        self.__prior_R_factor_inv = prior_R_factor_inv
 
         self.__init_states = init_states
         self.__bins_num = bins_num
@@ -115,6 +117,10 @@ class BaseModel(torch.nn.Module):
 
         return self.__nodes_num
 
+    def get_pairs_num(self):
+
+        return (self.__nodes_num-  1) * self.__nodes_num // 2
+
     def get_bins_num(self):
 
         return self.__bins_num
@@ -186,6 +192,12 @@ class BaseModel(torch.nn.Module):
 
         return self.__prior_C_Q
 
+    def get_prior_k(self):
+        '''
+        Returns the latent dimension of the node matrix, C
+        '''
+
+        return self.__prior_C_Q.shape[1]
 
     def get_bin_bounds(self):
         '''
@@ -426,90 +438,79 @@ class BaseModel(torch.nn.Module):
 
         return -(non_integral_term + integral_term)
 
-    # def get_neg_log_prior(self, nodes: torch.Tensor, R_factor_inv: torch.Tensor):
+    def get_neg_log_prior(self, nodes: torch.Tensor, compute_R_factor_inv: bool = True) -> torch.float:
 
-    #     # Get the bin bounds
-    #     bounds = self.get_bins_bounds()
+        # Covariance scaling coefficient
+        lambda_sq = torch.as_tensor(self.get_prior_lambda()**2, device=self.__device, dtype=torch.float)
 
-    #     # Get the middle time points of the bins
-    #     middle_bounds = ((bounds[1:] + bounds[:-1]) / 2.).view(1, self.get_bins_num())
+        # Noise for the Gaussian process
+        sigma_sq_inv = torch.as_tensor(1.0 / (self.get_prior_sigma()**2), device=self.__device, dtype=torch.float)
 
-    #     # B x B matrix
-    #     B_factor = prior.get_B_factor(
-    #         bin_centers1=middle_bounds, bin_centers2=middle_bounds, prior_B_x0_c=self.get_prior_B_x0_c(), prior_B_ls=self.get_prior_B_ls()
-    #     )
+        # Get the bin bounds
+        bounds = self.get_bin_bounds()
 
-    #     # N x K matrix where K is the community size
-    #     C_factor = prior.get_C_factor(prior_C_Q=self.get_prior_C_Q())
+        # Get the middle time points of the bins
+        middle_bounds = ((bounds[1:] + bounds[:-1]) / 2.).view(1, self.get_bins_num())
 
-    #     # D x D matrix
-    #     D_factor = prior.get_D_factor(dim=self.get_dim())
+        # B x B matrix
+        B_factor = prior.get_B_factor(
+            bin_centers1=middle_bounds, bin_centers2=middle_bounds, prior_B_x0_c=self.get_prior_B_x0_c(), prior_B_ls=self.get_prior_B_ls()
+        )
 
-    #     # R is the capacitance matrix defined by I + Kf.T @ inv(D) @ Kf
-    #     R_factor = prior.get_R_factor(
-    #         dim=self.get_prior_k() * (self.get_bins_num()+1) * self.get_dim(), sigma=self.get_prior_sigma(), 
-    #         B_factor=B_factor, C_factor=C_factor, D_factor=D_factor
-    #     )
-    #     R_factor_inv = torch.inverse(R_factor)
+        # N x K matrix where K is the community size
+        C_factor = prior.get_C_factor(prior_C_Q=self.get_prior_C_Q())
 
-    #     ''' '''
+        # D x D matrix
+        D_factor = prior.get_D_factor(dim=self.get_dim())
 
+        # Compute the Kf factor
+        Kf = torch.kron(B_factor.contiguous(), torch.kron(torch.index_select(C_factor, dim=0, index=nodes), D_factor))
 
-    #     # Get the bin bounds
-    #     bounds = self.get_bin_bounds()
-    #     # Get the middle time points of the bins for TxT covariance matrix
-    #     middle_bounds = ((bounds[1:] + bounds[:-1]) / 2.).view(1, self.get_bins_num())
-    #     # B x B matrix
-    #     B_factor = prior.get_B_factor(
-    #         bin_centers1=middle_bounds, bin_centers2=middle_bounds, prior_B_x0_c=self.get_prior_B_x0_c(), prior_B_ls=self.get_prior_B_ls()
-    #     )
+        # Compute the R factor if not provided
+        if compute_R_factor_inv is True:
 
-    #     # N x K matrix where K is the community size
-    #     C_factor = prior.get_C_factor(prior_C_Q=self.get_prior_C_Q())
-        
-    #     # D x D matrix
-    #     D_factor = prior.get_D_factor(dim=self.get_dim())
+            # R is the capacitance matrix defined by I + Kf.T @ inv(D) @ Kf
+            R_factor = prior.get_R_factor(
+                dim=self.get_prior_k() * (self.get_bins_num()+1) * self.get_dim(), sigma=self.get_prior_sigma(), 
+                B_factor=B_factor, C_factor=C_factor, D_factor=D_factor
+            )
+            R_factor_inv = torch.inverse(R_factor)
 
-    #     # B(batch_size)D x BKD matrix
-    #     Kf = torch.kron(B_factor, torch.kron(torch.index_select(C_factor, dim=0, index=nodes), D_factor))
+        else:
 
-    #     # Covariance scaling coefficient
-    #     lambda_sq = self.get_prior_lambda()**2
+            R_factor_inv = self.__prior_R_factor_inv
 
-    #     # Noise for the Gaussian process
-    #     sigma_sq_inv = 1.0 / (self.get_prior_sigma()**2)
+        # Normalize and vectorize the initial position and velocity vectors
+        x0_s = torch.index_select(self.get_x0_s(), dim=0, index=nodes).flatten() 
+        v_s = utils.vectorize(torch.index_select(self.get_v_s(),  dim=1, index=nodes)).flatten()
+        x0v_s = torch.hstack((x0_s, v_s))
 
-    #     # Normalize and vectorize the initial position and velocity vectors
-    #     x0 = torch.index_select(self.get_x0_s(), dim=0, index=nodes).flatten() 
-    #     v = utils.vectorize(torch.index_select(self.get_v_s(),  dim=1, index=nodes)).flatten()
-    #     x0v = torch.hstack((x0, v))
+        # Computation of the squared Mahalanobis distance: v.T @ inv(D + W @ W.T) @ v
+        # It uses Woodbury matrix identity: inv(D + Kf @ Kf.T) = inv(D) - inv(D) @ Kf @ inv(R) @ Kf.T @ inv(D),
+        # where R is the capacitance matrix defined by I + Kf.T @ inv(D) @ Kf
+        mahalanobis_term1 = sigma_sq_inv * x0v_s.pow(2).sum(-1)
+        mahalanobis_term2 = (sigma_sq_inv * x0v_s @ Kf @ R_factor_inv.T).pow(2).sum(-1)
+        m = (1.0 / lambda_sq) * ( mahalanobis_term1 - mahalanobis_term2 )
 
-    #     # Computation of the squared Mahalanobis distance: v.T @ inv(D + W @ W.T) @ v
-    #     # It uses Woodbury matrix identity: inv(D + Kf @ Kf.T) = inv(D) - inv(D) @ Kf @ inv(R) @ Kf.T @ inv(D),
-    #     # where R is the capacitance matrix defined by I + Kf.T @ inv(D) @ Kf
-    #     mahalanobis_term1 = sigma_sq_inv * x0v.pow(2).sum(-1)
-    #     mahalanobis_term2 = (sigma_sq_inv * x0v @ Kf @ R_factor_inv.T).pow(2).sum(-1)
-    #     m = (1.0 / lambda_sq) * (mahalanobis_term1 - mahalanobis_term2 )
+        # Define the final dimension size
+        final_dim = self.get_nodes_num() * (self.get_bins_num()+1) * self.get_dim()
 
-    #     # Define the final dimension size
-    #     final_dim = self.get_number_of_nodes() * (self.get_bins_num()+1) * self.get_dim()
+        # Computation of the log determinant
+        # It uses Matrix Determinant Lemma: log|D + Kf @ Kf.T| = log|R| + log|D|,
+        # where R is the capacitance matrix defined by I + Kf.T @ inv(D) @ Kf
+        log_det = -2 * R_factor_inv.diag().log().sum() + final_dim*(lambda_sq.log() - sigma_sq_inv.log())
 
-    #     # Computation of the log determinant
-    #     # It uses Matrix Determinant Lemma: log|D + Kf @ Kf.T| = log|R| + log|D|,
-    #     # where R is the capacitance matrix defined by I + Kf.T @ inv(D) @ Kf
-    #     log_det = 2 * R_factor.diagonal(dim1=-2, dim2=-1).log().sum(-1) + final_dim*(lambda_sq.log() - sigma_sq_inv.log())
+        # Compute the negative log-likelihood
+        log_prior = -0.5 * (final_dim * utils.LOG2PI + log_det + m)
 
-    #     # Compute the negative log-likelihood
-    #     log_prior = -0.5 * (final_dim * utils.LOG2PI + log_det + m)
-
-    #     return -log_prior
+        return -log_prior
 
 
     # def get_neg_log_posterior(self, nodes: torch.Tensor, pairs: torch.Tensor, states:torch.Tensor, 
-    #                                 borders:torch.Tensor, is_event:torch.Tensor, delta_t: torch.Tensor):
+    #                                 borders:torch.Tensor, is_event:torch.Tensor, delta_t: torch.Tensor, R_factor_inv: torch.Tensor = None):
 
     #     nll = self.get_nll(pairs=pairs, states=states, borders=borders, is_event=is_event, delta_t=delta_t)
         
-    #     nlp = self.get_neg_log_prior(nodes=nodes, R_factor=R_factor, R_factor_inv=R_factor_inv)
+    #     nlp, R_factor_inv = self.get_neg_log_prior(nodes=nodes, R_factor_inv=R_factor_inv)
 
-    #     return nll + nlp
+    #     return nll + nlp, R_factor_inv

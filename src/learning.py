@@ -8,7 +8,7 @@ import utils
 
 class LearningModel(BaseModel, torch.nn.Module):
 
-    def __init__(self, data, nodes_num, bins_num, dim, directed,
+    def __init__(self, data, nodes_num, bins_num, dim, k=10, directed = False,
                  lr: float = 0.1, batch_size: int = None, epoch_num: int = 100, steps_per_epoch=10, 
                  device: torch.device = None, verbose: bool = False, seed: int = 19):
 
@@ -25,11 +25,12 @@ class LearningModel(BaseModel, torch.nn.Module):
                 torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False),
                 torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False) if directed else None,
             ),
-            prior_lambda=1.0,
+            prior_lambda=1.0*1e4,
             prior_sigma=1.0,
             prior_B_x0_c=1.0,
             prior_B_ls=1.0,
-            prior_C_Q=1.0,
+            prior_C_Q=torch.rand(size=(nodes_num, k), device=device),
+            prior_R_factor_inv=None,
             init_states=torch.nn.Parameter(torch.zeros(size=((nodes_num-1)*nodes_num//2, ), device=device), requires_grad=False),
             bins_num=bins_num,
             directed=directed,
@@ -80,7 +81,7 @@ class LearningModel(BaseModel, torch.nn.Module):
         ))
 
         border_times = torch.hstack((
-            self.get_bin_bounds()[:-1].unsqueeze(0).expand(self.number_of_pairs(), self.get_bins_num()).flatten(),
+            self.get_bin_bounds()[:-1].unsqueeze(0).expand(self.get_pairs_num(), self.get_bins_num()).flatten(),
             times
         ))
 
@@ -102,7 +103,7 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         #### FIX - FIX - FIX ####
         mat_row_indices = utils.pairIdx2flatIdx(border_pairs[0], border_pairs[1], n=self.get_nodes_num()).type(torch.long)
-        counts = [0]*self.number_of_pairs() #torch.zeros(self.number_of_pairs(), dtype=torch.long, device=self.get_device())
+        counts = [0]*self.get_pairs_num() #torch.zeros(self.number_of_pairs(), dtype=torch.long, device=self.get_device())
         mat_col_indices = []
         for r in mat_row_indices:
             mat_col_indices.append(counts[r])
@@ -113,17 +114,17 @@ class LearningModel(BaseModel, torch.nn.Module):
         #### FIX - FIX - FIX ####
 
         # Find the corresponding border times of the chosen times
-        sparse_border_mat = torch.sparse_coo_tensor(mat_pairs, values=border_times, size=(self.number_of_pairs(), max_row_len))
+        sparse_border_mat = torch.sparse_coo_tensor(mat_pairs, values=border_times, size=(self.get_pairs_num(), max_row_len))
 
         states = torch.sparse.mm(
-            torch.sparse_coo_tensor(mat_pairs, values=is_event.type(torch.int), size=(self.number_of_pairs(), max_row_len)), 
+            torch.sparse_coo_tensor(mat_pairs, values=is_event.type(torch.int), size=(self.get_pairs_num(), max_row_len)), 
             torch.triu(torch.ones(size=(max_row_len, max_row_len), dtype=torch.int, device=self.get_device()), diagonal=0)
         )[mat_row_indices, mat_col_indices]
         states[states % 2 == 0] = 0
         states[states > 0] = 1
 
         delta_t = torch.sparse.mm(
-            torch.sparse_coo_tensor(mat_pairs, values=border_times, size=(self.number_of_pairs(), max_row_len)), 
+            torch.sparse_coo_tensor(mat_pairs, values=border_times, size=(self.get_pairs_num(), max_row_len)), 
             -torch.diag(torch.ones(max_row_len, dtype=torch.float, device=self.get_device()), diagonal=0) + 
             torch.diag(torch.ones(max_row_len-1, dtype=torch.float, device=self.get_device()), diagonal=-1) 
         )[mat_row_indices, mat_col_indices]
@@ -200,7 +201,7 @@ class LearningModel(BaseModel, torch.nn.Module):
     #     return sparse_border_mat, mat_pairs, border_pairs, border_times, is_event, states, delta_t, max_row_len
 
 
-    def __set_gradients(self, beta_grad=None, x0_grad=None, v_grad=None, reg_params_grad=None):
+    def __set_gradients(self, beta_grad=None, x0_grad=None, v_grad=None, prior_grad=None):
         '''
         Set the gradient status of the model parameters
         :param beta_grad: The gradient for the bias terms
@@ -208,28 +209,29 @@ class LearningModel(BaseModel, torch.nn.Module):
         :param v_grad: The gradient for the velocities
         '''
 
+        # Set the gradient of the bias terms
         if beta_grad is not None:
             self.get_beta_s().requires_grad = beta_grad
             if self.is_directed():
                 self.get_beta_r().requires_grad = beta_grad
 
+        # Set the gradient of the initial positions
         if x0_grad is not None:
             self.get_x0_s(standardize=False).requires_grad = x0_grad
             if self.is_directed():
                 self.get_x0_r().requires_grad = x0_grad
 
+        # Set the gradient of the velocities
         if v_grad is not None:
             self.get_v_s(standardize=False).requires_grad = v_grad
             if self.is_directed():
                 self.get_v_r().requires_grad = v_grad
                 
-        if reg_params_grad is not None:
-
-            # Set the gradients of the prior function
+        # Set the gradient of the all prior parameters
+        if prior_grad is not None:
             for name, param in self.named_parameters():
                 if '_prior' in name:
-                    param.requires_grad = reg_params_grad
-
+                    param.requires_grad = prior_grad
 
     def learn(self, loss_file_path=None):
 
@@ -260,8 +262,8 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         # Define the optimizers and parameter group names
         self.group_optimizers = []
-        self.param_groups = [["v"], ["v", "x0"]]
-        self.group_epoch_weights = [1.0, 1.0]
+        self.param_groups = [["v"], ["v", "x0"], ["v", "x0", "prior"]]
+        self.group_epoch_weights = [1.0, 1.0, 1.0]
 
         # For each group of parameters, add a new optimizer
         for current_group in self.param_groups:
@@ -312,7 +314,8 @@ class LearningModel(BaseModel, torch.nn.Module):
         epoch_loss, epoch_nll = [], []
         for batch_num in range(self.__steps_per_epoch):
 
-            batch_loss, batch_nll = self.__train_one_batch(batch_num)
+            batch_nll, batch_nlp = self.__train_one_batch(batch_num)
+            batch_loss = batch_nll + batch_nlp
 
             epoch_loss.append(batch_loss)
             epoch_nll.append(batch_nll)
@@ -358,7 +361,7 @@ class LearningModel(BaseModel, torch.nn.Module):
         idx = utils.pairIdx2flatIdx(batch_unique_pairs[0], batch_unique_pairs[1], self.get_nodes_num())
         sparse_batch_index_mat = torch.sparse_coo_tensor(
             torch.vstack((idx, idx)), values=torch.ones(size=(batch_unique_pairs.shape[1], ), dtype=torch.float, device=self.get_device()),
-            size=(self.number_of_pairs(), self.number_of_pairs())
+            size=(self.get_pairs_num(), self.get_pairs_num())
         )
 
         batch_pairs = utils.linearIdx2matIdx(
@@ -368,52 +371,52 @@ class LearningModel(BaseModel, torch.nn.Module):
         batch_borders = torch.sparse.mm(
             sparse_batch_index_mat, torch.sparse_coo_tensor(
                 self.__mat_pairs, values=self.__border_times, dtype=torch.float, device=self.get_device(),
-                size=(self.number_of_pairs(), self.__max_row_len)
+                size=(self.get_pairs_num(), self.__max_row_len)
             )
         ).coalesce().values()
 
         batch_states = torch.sparse.mm(
             sparse_batch_index_mat, torch.sparse_coo_tensor(
                 self.__mat_pairs, values=self.__states, dtype=torch.float, device=self.get_device(),
-                size=(self.number_of_pairs(), self.__max_row_len)
+                size=(self.get_pairs_num(), self.__max_row_len)
             )
         ).coalesce().type(torch.long).values()
 
         batch_is_event = torch.sparse.mm(
             sparse_batch_index_mat, torch.sparse_coo_tensor(
                 self.__mat_pairs, values=self.__is_event, dtype=torch.float, device=self.get_device(),
-                size=(self.number_of_pairs(), self.__max_row_len)
+                size=(self.get_pairs_num(), self.__max_row_len)
             )
         ).coalesce().type(torch.int).values()
 
         batch_delta_t = torch.sparse.mm(
             sparse_batch_index_mat, torch.sparse_coo_tensor(
                 self.__mat_pairs, values=self.__delta_t, dtype=torch.float, device=self.get_device(),
-                size=(self.number_of_pairs(), self.__max_row_len)
+                size=(self.get_pairs_num(), self.__max_row_len)
             )
         ).coalesce().values()
 
-        average_batch_loss, average_batch_nll = self.forward(
-            pairs=batch_pairs, states=batch_states, borders=batch_borders, is_event=batch_is_event, delta_t=batch_delta_t
+        # Compute the R factor inverse if the batch number is 0
+        compute_R_factor_inv = True if batch_num == 0 else False
+
+        # Finally, compute the negative log-likelihood and the negative log-prior for the batch
+        average_batch_nll, average_batch_nlp = self.forward(
+            nodes=batch_nodes, pairs=batch_pairs, states=batch_states, borders=batch_borders, 
+            is_event=batch_is_event, delta_t=batch_delta_t, compute_R_factor_inv=compute_R_factor_inv
         )
 
-        return average_batch_loss, average_batch_nll
+        return average_batch_nll, average_batch_nlp
 
+    def forward(self, nodes: torch.Tensor, pairs: torch.Tensor, states: torch.Tensor, borders: torch.Tensor, is_event=torch.Tensor, delta_t=torch.Tensor, compute_R_factor_inv=True):
 
-    def forward(self, pairs: torch.Tensor, states: torch.Tensor, borders: torch.Tensor, is_event=torch.Tensor, delta_t=torch.Tensor ):
+        # Get the negative log-likelihood
+        nll = self.get_nll(pairs=pairs, states=states, borders=borders, is_event=is_event, delta_t=delta_t)
+        
+        # Get the negative log-prior and the R-factor inverse
+        nlp = self.get_neg_log_prior(nodes=nodes, compute_R_factor_inv=compute_R_factor_inv)
 
-        total, nll = 0, 0
-        nll = self.get_nll(
-            pairs=pairs, states=states, borders=borders, is_event=is_event, delta_t=delta_t
-        )
-
-        total = nll
-
-        return total, nll
-
-    def number_of_pairs(self):
-
-        return (self.get_nodes_num()-1) * self.get_nodes_num() // 2
+        return nll, nlp
+        
 
     def save(self, path):
 

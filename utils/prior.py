@@ -32,7 +32,7 @@ def get_B(bin_centers1: torch.Tensor, bin_centers2: torch.Tensor, prior_B_x0_c: 
     kernel = rbf(t1=bin_centers1, t2=bin_centers2, ls=prior_B_ls)
 
     # Combine the entry required for x0 with the velocity vectors covariance
-    kernel = torch.block_diag(prior_B_x0_c_sq, kernel)
+    kernel = torch.block_diag(torch.as_tensor(prior_B_x0_c_sq), kernel)
 
     # Add a constant term to get rid of computational problems and singularity
     kernel = kernel + EPS*torch.eye(n=kernel.shape[0], m=kernel.shape[1])
@@ -62,6 +62,7 @@ def get_C_factor(prior_C_Q):
     :param prior_C_Q: hyper-parameter to construct factor matrix
     :return:
     '''
+
     # N x K matrix
     return torch.softmax(prior_C_Q, dim=1)
 
@@ -87,7 +88,7 @@ def get_R(dim, sigma, B_factor, C_factor, D_factor):
     :return:
     '''
 
-    R = torch.eye(dim) + (1./sigma**2)*torch.kron(B_factor.T @ B_factor, torch.kron(C_factor.T @ C_factor, torch.kron(D_factor.T @ D_factor)))
+    R = torch.eye(dim) + (1./sigma**2)*torch.kron(B_factor.T @ B_factor, torch.kron(C_factor.T @ C_factor, D_factor.T @ D_factor))
 
     return R
 
