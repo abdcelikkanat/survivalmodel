@@ -13,15 +13,15 @@ class LearningModel(BaseModel, torch.nn.Module):
                  device: torch.device = None, verbose: bool = False, seed: int = 19):
 
         super(LearningModel, self).__init__(
-            x0=(
+            x0 = (
                 torch.nn.Parameter(2. * torch.rand(size=(nodes_num, dim), device=device) - 1., requires_grad=False), 
                 torch.nn.Parameter(2. * torch.rand(size=(nodes_num, dim), device=device) - 1., requires_grad=False) if directed else None, 
             ),
-            v=(
+            v = (
                 torch.nn.Parameter(torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False),
-                torch.nn.Parameter(torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False) if directed else None,
+                torch.nn.Parameter(torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False) if directed else None
             ),
-            beta=(
+            beta = (
                 torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False),
                 torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False) if directed else None,
             ),
@@ -39,12 +39,12 @@ class LearningModel(BaseModel, torch.nn.Module):
         )
 
         # Optimization parameters
-        self.__lp = "seq" # Learning procedure
+        self.__lp = "sequential" # Learning procedure
         self.__lr = lr # Learning rate
         self.__epoch_num = epoch_num # Number of epochs
         self.__batch_size = nodes_num if batch_size is None else batch_size # Batch size
         self.__steps_per_epoch = steps_per_epoch # Number of steps per epoch
-        self.__optimizer = self.torch.optim.Adam # Optimizer
+        self.__optimizer = torch.optim.Adam # Optimizer
 
         # Define the model variables
         self.__sparse_border_mat = None
@@ -199,78 +199,123 @@ class LearningModel(BaseModel, torch.nn.Module):
 
     #     return sparse_border_mat, mat_pairs, border_pairs, border_times, is_event, states, delta_t, max_row_len
 
+
+    def __set_gradients(self, beta_grad=None, x0_grad=None, v_grad=None, reg_params_grad=None):
+        '''
+        Set the gradient status of the model parameters
+        :param beta_grad: The gradient for the bias terms
+        :param x0_grad: The gradient for the initial positions
+        :param v_grad: The gradient for the velocities
+        '''
+
+        if beta_grad is not None:
+            self.get_beta_s().requires_grad = beta_grad
+            if self.is_directed():
+                self.get_beta_r().requires_grad = beta_grad
+
+        if x0_grad is not None:
+            self.get_x0_s(standardize=False).requires_grad = x0_grad
+            if self.is_directed():
+                self.get_x0_r().requires_grad = x0_grad
+
+        if v_grad is not None:
+            self.get_v_s(standardize=False).requires_grad = v_grad
+            if self.is_directed():
+                self.get_v_r().requires_grad = v_grad
+                
+        if reg_params_grad is not None:
+
+            # Set the gradients of the prior function
+            for name, param in self.named_parameters():
+                if '_prior' in name:
+                    param.requires_grad = reg_params_grad
+
+
     def learn(self, loss_file_path=None):
 
-        # Initialize optimizer list
-        self.__optimizer = []
+        # Check the learning procedure
+        if self.__lp == "sequential":
 
-        # For each parameter group, add an optimizer
-        for param_group in self.__learning_param_names:
-            
-            # Set the gradients to True
-            for param_name in param_group:
-                self.__set_gradients(**{f"{param_name}_grad": True})
+            # Run sequential learning
+            loss, nll = self.__sequential_learning()
 
-            # Add a new optimizer
-            self.__optimizer.append(
-                torch.optim.Adam(self.parameters(), lr=self.__lr)
-            )
-            # Set the gradients to False
-            for param_name in param_group:
-                self.__set_gradients(**{f"{param_name}_grad": False})
+        else:
 
-        # Run sequential learning
-        self.__sequential_learning()
+            raise Exception(f"Unknown learning procedure: {self.__lp}")
 
         # Save the loss if the loss file path was given
         if loss_file_path is not None:
             
             with open(loss_file_path, 'w') as f:
-                for batch_losses, nll_losses in zip(self.__loss, self.__nll):
+                for batch_losses, nll_losses in zip(loss, nll):
                     f.write(f"Loss: {' '.join('{:.3f}'.format(loss) for loss in batch_losses)}\n")
                     f.write(f"Nll: {' '.join('{:.3f}'.format(loss) for loss in nll_losses)}\n")
+
+        return loss, nll
 
     def __sequential_learning(self):
 
         if self.get_verbose():
-            print("- Training started (Sequential Learning).")
+            print("- Training started (Procedure: Sequential Learning).")
 
-        current_epoch = 0
-        current_param_group_idx = 0
+        # Define the optimizers and parameter group names
+        self.group_optimizers = []
+        self.param_groups = [["v"], ["v", "x0"]]
+        self.group_epoch_weights = [1.0, 1.0]
+
+        # For each group of parameters, add a new optimizer
+        for current_group in self.param_groups:
+            
+            # Set the gradients to True
+            self.__set_gradients(**{f"{param_name}_grad": True for param_name in current_group})
+
+            # Add a new optimizer
+            self.group_optimizers.append(self.__optimizer(self.parameters(), lr=self.__lr))
+            
+            # Set the gradients to False
+            self.__set_gradients(**{f"{param_name}_grad": False for param_name in current_group})
+
+
+        # Determine the number of epochs for each parameter group
         group_epoch_counts = (self.__epoch_num * torch.cumsum(
-            torch.as_tensor([0] + self.__learning_param_epoch_weights, device=self.get_device(), dtype=torch.float), dim=0
-        ) / sum(self.__learning_param_epoch_weights)).type(torch.int)
+            torch.as_tensor([0] + self.group_epoch_weights, device=self.get_device(), dtype=torch.float), dim=0
+        ) / sum(self.group_epoch_weights)).type(torch.int)
         group_epoch_counts = group_epoch_counts[1:] - group_epoch_counts[:-1]
 
-        while current_epoch < self.__epoch_num:
+        # Run the epochs
+        loss, nll = [], []
+        epoch_num = 0
+        for current_epoch_count, optimizer, current_group in zip(group_epoch_counts, self.group_optimizers, self.param_groups):
 
             # Set the gradients to True
-            for param_name in self.__learning_param_names[current_param_group_idx]:
-                self.__set_gradients(**{f"{param_name}_grad": True})
+            self.__set_gradients(**{f"{param_name}_grad": True for param_name in current_group})
 
-            # Repeat the optimization of the group parameters given weight times
-            for _ in range(group_epoch_counts[current_param_group_idx]):
-                self.__train_one_epoch(
-                    epoch_num=current_epoch, optimizer=self.__optimizer[current_param_group_idx]
-                )
-                current_epoch += 1
+            # Run the epochs
+            for _ in range(current_epoch_count):
+                epoch_loss, epoch_nll = self.__train_one_epoch(epoch_num=epoch_num, optimizer=optimizer)
+                loss.append(epoch_loss)
+                nll.append(epoch_nll)
 
-            # Iterate the parameter group id
-            current_param_group_idx += 1
+                # Increase the epoch number by one
+                epoch_num += 1
+
+                # print("=>", self.get_x0_s(standardize=False).requires_grad, self.get_v_s(standardize=False).requires_grad )
+
+
+        return loss, nll
 
     def __train_one_epoch(self, epoch_num, optimizer):
 
         init_time = time.time()
 
         total_batch_loss = 0
-        self.__loss.append([])
-        self.__nll.append([])
+        epoch_loss, epoch_nll = [], []
         for batch_num in range(self.__steps_per_epoch):
 
             batch_loss, batch_nll = self.__train_one_batch(batch_num)
 
-            self.__loss[-1].append(batch_loss)
-            self.__nll[-1].append(batch_nll)
+            epoch_loss.append(batch_loss)
+            epoch_nll.append(batch_nll)
 
             total_batch_loss += batch_loss
 
@@ -284,15 +329,17 @@ class LearningModel(BaseModel, torch.nn.Module):
         optimizer.step()
 
         # Get the average epoch loss
-        epoch_loss = total_batch_loss / float(self.__steps_per_epoch)
+        avg_loss = total_batch_loss / float(self.__steps_per_epoch)
 
-        if not math.isfinite(epoch_loss):
-            print(f"- Epoch loss is {epoch_loss}, stopping training")
+        if not math.isfinite(avg_loss):
+            print(f"- Epoch loss is {avg_loss}, stopping training")
             sys.exit(1)
 
         if self.get_verbose() and (epoch_num % 10 == 0 or epoch_num == self.__epoch_num - 1):
             time_diff = time.time() - init_time
-            print("\t+ Epoch = {} | Loss/train: {} | Elapsed time: {:.2f}".format(epoch_num, epoch_loss, time_diff))
+            print("\t+ Epoch = {} | Avg. Loss/train: {} | Elapsed time: {:.2f}".format(epoch_num, avg_loss, time_diff))
+
+        return epoch_loss, epoch_nll
 
     def __train_one_batch(self, batch_num):
 
@@ -363,30 +410,6 @@ class LearningModel(BaseModel, torch.nn.Module):
         total = nll
 
         return total, nll
-
-    def __set_gradients(self, beta_grad=None, x0_grad=None, v_grad=None, reg_params_grad=None):
-
-        if beta_grad is not None:
-            self.get_beta_s().requires_grad = beta_grad
-            if self.is_directed():
-                self.get_beta_r().requires_grad = beta_grad
-
-        if x0_grad is not None:
-            self.get_x0_s(standardize=False).requires_grad = x0_grad
-            if self.is_directed():
-                self.get_x0_r().requires_grad = x0_grad
-
-        if v_grad is not None:
-            self.get_v_s(standardize=False).requires_grad = v_grad
-            if self.is_directed():
-                self.get_v_r().requires_grad = v_grad
-
-        if reg_params_grad is not None:
-
-            # Set the gradients of the prior function
-            for name, param in self.named_parameters():
-                if '_prior' in name:
-                    param.requires_grad = reg_params_grad
 
     def number_of_pairs(self):
 

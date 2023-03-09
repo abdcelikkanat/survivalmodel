@@ -22,17 +22,17 @@ dataset_name = "4node"
 bins_num = 100
 dim = 2
 last_time = 1.0
-epoch_num = 5000
+epoch_num = 200
 steps_per_epoch = 1 #10
 batch_size = 4 #50 #-1
-learning_rate = 0.1
+lr = 0.1
 normalize = True
 
 seed = 19 #19
 verbose = True
 
 # Define the model name
-model_name = f"{dataset_name}_B={bins_num}_D={dim}_T={last_time}_lr={learning_rate}_bs={batch_size}_ep={epoch_num}_spe={steps_per_epoch}"
+model_name = f"{dataset_name}_B={bins_num}_D={dim}_T={last_time}_lr={lr}_bs={batch_size}_ep={epoch_num}_spe={steps_per_epoch}"
 
 # Get the current folder path
 current_folder = os.path.dirname(os.path.abspath(__file__))
@@ -43,16 +43,21 @@ model_path=os.path.join(current_folder, '..', 'models', model_name + ".model")
 nodes_num = 4
 
 # # data = [[0,1], [0,2], [0,3], [1,2], [1,3], [2,3]], [[], [0.1, 0.3], [], [], [0.7, 0.9], []]
-pairs = [ (0, 2), (0, 2), (1, 3), (1, 3) ]
-events = [ 0.1,  0.6,  0.7, 0.9 ]
-states = [ 0, 0, 0, 0 ]
-data = pairs, events, states
-directed = False
+#####
+# pairs = [ (0, 2), (0, 2), (1, 3), (1, 3) ]
+# events = [ 0.1,  0.6,  0.7, 0.9 ]
+# states = [ 0, 0, 0, 0 ]
+pairs = [ (0, 2), (0, 2), (1, 3), (1, 3), (2 ,3), (2, 3), (0, 3), (0, 3), (0, 1), (0, 1) ]
+events = [ 0.1,  0.7,  0.2, 0.6, 0.3, 0.5, 0.3, 0.5, 0.3, 0.5 ]
+init_states = [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+
+data = pairs, events, init_states
+directed = True #False
 
 # Define the learning model
 lm = LearningModel(
     data=data, nodes_num=nodes_num, bins_num=bins_num, dim=dim, directed=directed,
-    lr=learning_rate, batch_size=batch_size, epoch_num=epoch_num, steps_per_epoch=steps_per_epoch,
+    lr=lr, batch_size=batch_size, epoch_num=epoch_num, steps_per_epoch=steps_per_epoch,
     device=torch.device(device), verbose=verbose, seed=seed,
 )
 lm.learn()
