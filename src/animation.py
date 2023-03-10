@@ -118,8 +118,7 @@ class Animation:
 
         fig, ax = plt.subplots(figsize=self._figsize, frameon=True)
         ax.set_axis_off()
-        x_min, y_min = self._embs.min(axis=0).min(axis=0)
-        x_max, y_max = self._embs.max(axis=0).max(axis=0)
+
         self._anim = self._render(fig)
 
         # fig.set_size_inches(y_max-y_min, x_max-x_min, )
@@ -133,8 +132,3 @@ class Animation:
             raise ValueError("Invalid format!")
 
         self._anim.save(filepath, writer)
-
-
-# embs = np.random.randn(100, 10, 2)
-# anim = Animation(embs)
-# anim.save("./deneme.mp4")

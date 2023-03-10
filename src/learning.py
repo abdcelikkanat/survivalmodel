@@ -26,10 +26,22 @@ class LearningModel(BaseModel, torch.nn.Module):
                 torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False) if directed else None,
             ),
             prior_lambda=torch.as_tensor(prior_lambda, dtype=torch.float, device=device),
-            prior_sigma=(torch.ones(1, ), torch.ones(1, )), #(torch.randn(size=(1, ), device=device), torch.randn(size=(1, ), device=device) if directed else None),
-            prior_B_x0_c=(torch.ones(1, ), torch.ones(1, )), #(torch.rand(size=(1, ), device=device)+1, torch.rand(size=(1, ), device=device) if directed else None),
-            prior_B_ls=(torch.ones(1, ), torch.ones(1, )), #(torch.rand(size=(1, ), device=device)+1, torch.rand(size=(1, ), device=device) if directed else None),
-            prior_C_Q=(torch.rand(size=(nodes_num, k), device=device), torch.rand(size=(nodes_num, k), device=device) if directed else None),
+            prior_sigma=(
+                torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False), 
+                torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False) if directed else None
+            ),
+            prior_B_x0_c=(
+                torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False), 
+                torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False) if directed else None
+            ),
+            prior_B_ls=(
+                torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False), 
+                torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False) if directed else None
+            ),
+            prior_C_Q=(
+                torch.nn.Parameter(2. * torch.rand(size=(nodes_num, k), device=device) - 1,  requires_grad=False), 
+                torch.nn.Parameter(2. * torch.rand(size=(nodes_num, k), device=device) - 1,  requires_grad=False)  if directed else None
+            ),
             prior_R_factor_inv=(None, None),
             init_states=torch.nn.Parameter(torch.zeros(size=((nodes_num-1)*nodes_num//2, ), device=device), requires_grad=False),
             bins_num=bins_num,

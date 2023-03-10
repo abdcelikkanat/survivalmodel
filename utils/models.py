@@ -25,17 +25,23 @@ def unvectorize(x: torch.Tensor, size):
     return x.reshape((size[0], size[1], size[2]))
 
 
+def normalize(x: torch.Tensor):
+
+    return x #x / (torch.norm(x, p='fro', dim=-1, keepdim=True) +  1e-12 )
+
 def standardize(x: torch.Tensor):
 
     if x.dim() == 2:
-        return x - torch.mean(x, dim=0, keepdim=True)
+        return normalize(x - torch.mean(x, dim=0, keepdim=True))
 
     elif x.dim() == 3:
 
-        return x - torch.mean(x, dim=1, keepdim=True)
+        return normalize(x - torch.mean(x, dim=1, keepdim=True))
 
     else:
 
         raise ValueError("Input of the tensor must be 2 or 3!")
+
+
 
 

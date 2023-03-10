@@ -10,11 +10,10 @@ def rbf(t1: torch.Tensor, t2: torch.Tensor, ls: torch.Tensor):
     param: t3: input values
     param ls: length scale parameter
     '''
-
     time_mat = t1 - t2.T
-    return torch.exp(-torch.div(time_mat**2, ls**2)/2.0)
+    return torch.exp(-(time_mat**2 / (2.0*ls**2)))
 
-def get_B(bin_centers1: torch.Tensor, bin_centers2: torch.Tensor, prior_B_x0_c: torch.Tensor, prior_B_ls: torch.Tensor) -> torch.Tensor:
+def get_B(bin_centers1: torch.Tensor, bin_centers2: torch.Tensor, prior_B_x0_c: torch.Tensor, prior_B_ls: torch.Tensor, noise: float = 10*EPS) -> torch.Tensor:
     '''
     Computes the bin matrix, B, of shape (B+1) x (B+1)
 
@@ -32,10 +31,10 @@ def get_B(bin_centers1: torch.Tensor, bin_centers2: torch.Tensor, prior_B_x0_c: 
     kernel = rbf(t1=bin_centers1, t2=bin_centers2, ls=prior_B_ls)
 
     # Combine the entry required for x0 with the velocity vectors covariance
-    kernel = torch.block_diag(torch.as_tensor(prior_B_x0_c_sq), kernel)
+    kernel = torch.block_diag(prior_B_x0_c_sq, kernel)
 
     # Add a constant term to get rid of computational problems and singularity
-    kernel = kernel + EPS*torch.eye(n=kernel.shape[0], m=kernel.shape[1])
+    kernel = kernel + noise*torch.eye(n=kernel.shape[0], m=kernel.shape[1])
 
     return kernel
 
@@ -50,7 +49,6 @@ def get_B_factor(bin_centers1: torch.Tensor, bin_centers2: torch.Tensor, prior_B
     :param prior_B_ls: length-scale parameter of the RBF kernel used for the velocities
     :return:
     '''
-
     # B x B lower triangular matrix
     return torch.linalg.cholesky(get_B(bin_centers1, bin_centers2, prior_B_x0_c, prior_B_ls))
 

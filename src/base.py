@@ -438,10 +438,12 @@ class BaseModel(torch.nn.Module):
         r = delta_r_v * inv_norm_delta_v
 
         term0 = 0.5 * torch.sqrt(torch.as_tensor(utils.PI, device=self.__device)) * inv_norm_delta_v
-        term1 = torch.exp(beta_ij - (2*states-1)*(r**2) + (2*states-1)*(norm_delta_r ** 2))
+        term1 = torch.exp(beta_ij - (2*states-1)*( r**2 - norm_delta_r**2) )
 
         term2_u = (1-states)*torch.erf(delta_t * norm_delta_v + r) + states*utils.erfi_approx(delta_t * norm_delta_v + r)
         term2_l = (1-states)*torch.erf(r) + states*utils.erfi_approx(r)
+
+        # print("---", ((2*states-1)*(r**2)).sum().data, term1.sum().data, term2_u.sum().data, term2_l.sum().data)
 
         return (term0 * term1 * (term2_u - term2_l))
 
@@ -464,6 +466,8 @@ class BaseModel(torch.nn.Module):
         integral_term = -self.get_intensity_integral(
             time_list=borders, pairs=pairs.type(torch.long), delta_t=delta_t, states=states.type(torch.long)
         ).sum()
+
+        # print("NLL: ", non_integral_term.data, integral_term.data)
 
         return -(non_integral_term + integral_term)
 
