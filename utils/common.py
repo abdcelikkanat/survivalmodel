@@ -37,15 +37,17 @@ def set_seed(seed):
     torch.manual_seed(seed)
 
 
-def pair_iter(n, undirected=True):
+def pair_iter(n, directed=False):
 
-    if undirected:
+    if directed:
         for i in range(n):
-            for j in range(i+1, n):
-                yield i, j
+            for j in range(n):
+                if i == j:
+                    continue
+                else:
+                    yield i, j
 
     else:
-
         for i in range(n):
             for j in range(i+1, n):
                 yield i, j
@@ -64,23 +66,33 @@ def erfi_approx(z: torch.Tensor):
     return ( 1 - (t*(_ERFI_A1 + t*(_ERFI_A2 + t*(_ERFI_A3 + t*(_ERFI_A4 + t*_ERFI_A5))))) * torch.exp(-z_**2) ).imag
 
 
-def pairIdx2flatIdx(i, j, n, undirected=True):
+def pairIdx2flatIdx(i, j, n, directed=False):
 
-    if undirected:
+    if not directed:
 
-        return (n-1) * i - (i*(i+1)/2) + (j-1)
+        return (n-1) * i - (i*(i+1)//2) + (j-1)
 
     else:
 
-        return i*n + j
+        return i*n + j - i - 1*(j>i)
 
 # A method converting linear index to pair index
-def linearIdx2matIdx(idx, n, dtype=torch.int):
+def linearIdx2matIdx(idx, n, dtype=torch.int, directed=False):
 
-    r = torch.ceil(n - 1 - 0.5 - torch.sqrt(n ** 2 - n - 2 * idx - 1.75)).type(dtype)
-    c = idx - r * n + ((r + 1) * (r + 2)) // 2
+    if directed:
 
-    return torch.vstack((r.type(dtype), c.type(dtype))).T
+        row_idx = idx // (n-1)
+        col_idx = idx % (n-1)
+        col_idx[col_idx >= row_idx] += 1
+
+        return torch.vstack((row_idx, col_idx)).T
+
+    else:
+
+        r = torch.ceil(n - 1 - 0.5 - torch.sqrt(n ** 2 - n - 2 * idx - 1.75)).type(dtype)
+        c = idx - r * n + ((r + 1) * (r + 2)) // 2
+
+        return torch.vstack((r.type(dtype), c.type(dtype))).T
 
 
 def plot_events(num_of_nodes, samples, labels, title=""):

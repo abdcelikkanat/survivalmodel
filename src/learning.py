@@ -12,39 +12,26 @@ class LearningModel(BaseModel, torch.nn.Module):
                  lr: float = 0.1, batch_size: int = None, epoch_num: int = 100, steps_per_epoch=10, 
                  device: torch.device = None, verbose: bool = False, seed: int = 19):
 
+        utils.set_seed(seed)
+
         super(LearningModel, self).__init__(
-            x0 = (
-                torch.nn.Parameter(2. * torch.rand(size=(nodes_num, dim), device=device) - 1., requires_grad=False), 
-                torch.nn.Parameter(2. * torch.rand(size=(nodes_num, dim), device=device) - 1., requires_grad=False) if directed else None, 
-            ),
-            v = (
-                torch.nn.Parameter(torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False),
-                torch.nn.Parameter(torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False) if directed else None
-            ),
-            beta = (
-                torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False),
-                torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False) if directed else None,
-            ),
-            prior_lambda=torch.as_tensor(prior_lambda, dtype=torch.float, device=device),
-            prior_sigma=(
-                torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False), 
-                torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False) if directed else None
-            ),
-            prior_B_x0_c=(
-                torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False), 
-                torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False) if directed else None
-            ),
-            prior_B_ls=(
-                torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False), 
-                torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False) if directed else None
-            ),
-            prior_C_Q=(
-                torch.nn.Parameter(2. * torch.rand(size=(nodes_num, k), device=device) - 1,  requires_grad=False), 
-                torch.nn.Parameter(2. * torch.rand(size=(nodes_num, k), device=device) - 1,  requires_grad=False)  if directed else None
-            ),
-            prior_R_factor_inv=(None, None),
+            x0_s = torch.nn.Parameter(2. * torch.rand(size=(nodes_num, dim), device=device) - 1., requires_grad=False), 
+            x0_r = torch.nn.Parameter(2. * torch.rand(size=(nodes_num, dim), device=device) - 1., requires_grad=False) if directed else None,
+            v_s = torch.nn.Parameter(torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False),
+            v_r = torch.nn.Parameter(torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False) if directed else None,
+            beta_s = torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False),
+            beta_r = torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False) if directed else None,
+            prior_lambda = torch.as_tensor(prior_lambda, dtype=torch.float, device=device),
+            prior_sigma_s = torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False), 
+            prior_sigma_r = torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False) if directed else None,
+            prior_B_x0_logit_c_s = torch.nn.Parameter(torch.special.logit(torch.rand(size=(1, ), device=device)), requires_grad=False), 
+            prior_B_x0_logit_c_r = torch.nn.Parameter(torch.special.logit(torch.rand(size=(1, ), device=device)), requires_grad=False) if directed else None,
+            prior_B_ls_s = torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False), 
+            prior_B_ls_r = torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False) if directed else None,
+            prior_C_Q_s = torch.nn.Parameter(2. * torch.rand(size=(nodes_num, k), device=device) - 1,  requires_grad=False), 
+            prior_C_Q_r = torch.nn.Parameter(2. * torch.rand(size=(nodes_num, k), device=device) - 1,  requires_grad=False)  if directed else None,
+            prior_R_factor_inv_s = None, prior_R_factor_inv_r = None,
             init_states=torch.nn.Parameter(torch.zeros(size=((nodes_num-1)*nodes_num//2, ), device=device), requires_grad=False),
-            bins_num=bins_num,
             directed=directed,
             device=device,
             verbose=verbose,
@@ -137,8 +124,6 @@ class LearningModel(BaseModel, torch.nn.Module):
             torch.diag(torch.ones(max_row_len-1, dtype=torch.float, device=self.get_device()), diagonal=-1) 
         )[mat_row_indices, mat_col_indices]
         delta_t[delta_t < 0] = self.get_last_time() + delta_t[delta_t < 0]
-
-        # raise Exception("STOP")
 
         return sparse_border_mat, mat_pairs, border_pairs, border_times, is_event, states, delta_t, max_row_len
 
@@ -241,9 +226,6 @@ class LearningModel(BaseModel, torch.nn.Module):
 
                 # Increase the epoch number by one
                 epoch_num += 1
-
-                # print("=>", self.get_x0_s(standardize=False).requires_grad, self.get_v_s(standardize=False).requires_grad )
-
 
         return loss, nll
 
@@ -356,26 +338,37 @@ class LearningModel(BaseModel, torch.nn.Module):
         # Get the negative log-prior and the R-factor inverse
         nlp = self.get_neg_log_prior(nodes=nodes, compute_R_factor_inv=compute_R_factor_inv)
 
+        # print(nll, nlp)
+
         return nll, nlp
         
-
     def save(self, path):
 
         if self.get_verbose():
             print(f"- Model file is saving.")
             print(f"\t+ Target path: {path}")
 
+        # kwargs = {
+        #     'data': [self.__events_pairs, self.__events ],
+        #     'nodes_num': self.get_nodes_num(), 'bins_num': self.get_bins_num(), 'dim': self.get_dim(),
+        #     'last_time': self.get_last_time(), 'approach': self.__approach,
+        #     # 'prior_k': self.get_prior_k(), 'prior_lambda': self.get_prior_lambda(), 'masked_pairs': self.__masked_pairs,
+        #     'learning_rate': self.__learning_rate, 'batch_size': self.__batch_size, 'epoch_num': self.__epoch_num,
+        #     'steps_per_epoch': self.__steps_per_epoch,
+        #     'device': self.get_device(), 'verbose': self.get_verbose(), 'seed': self.get_seed(),
+        #     # 'learning_procedure': self.__learning_procedure,
+        #     # 'learning_param_names': self.__learning_param_names,
+        #     # 'learning_param_epoch_weights': self.__learning_param_epoch_weights
+        # }
+
         kwargs = {
-            'data': [self.__events_pairs, self.__events ],
-            'nodes_num': self.get_nodes_num(), 'bins_num': self.get_bins_num(), 'dim': self.get_dim(),
-            'last_time': self.get_last_time(), 'approach': self.__approach,
-            # 'prior_k': self.get_prior_k(), 'prior_lambda': self.get_prior_lambda(), 'masked_pairs': self.__masked_pairs,
-            'learning_rate': self.__learning_rate, 'batch_size': self.__batch_size, 'epoch_num': self.__epoch_num,
-            'steps_per_epoch': self.__steps_per_epoch,
-            'device': self.get_device(), 'verbose': self.get_verbose(), 'seed': self.get_seed(),
-            # 'learning_procedure': self.__learning_procedure,
-            # 'learning_param_names': self.__learning_param_names,
-            # 'learning_param_epoch_weights': self.__learning_param_epoch_weights
+            'directed': self.is_directed(), 
+            'init_states': self.get_init_states(),
+            'prior_lambda': self.get_prior_lambda(), 
+            'prior_R_factor_inv_s': self.get_prior_R_factor_inv_s(),
+            'prior_R_factor_inv_r':  self.get_prior_R_factor_inv_r(),
+            'device': self.get_device(), 'verbose': self.get_verbose(), 
+            'seed': self.get_seed()
         }
 
         torch.save([kwargs, self.state_dict()], path)

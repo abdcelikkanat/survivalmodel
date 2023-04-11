@@ -13,7 +13,7 @@ def rbf(t1: torch.Tensor, t2: torch.Tensor, ls: torch.Tensor):
     time_mat = t1 - t2.T
     return torch.exp(-(time_mat**2 / (2.0*ls**2)))
 
-def get_B(bin_centers1: torch.Tensor, bin_centers2: torch.Tensor, prior_B_x0_c: torch.Tensor, prior_B_ls: torch.Tensor, noise: float = 10*EPS) -> torch.Tensor:
+def get_B(bin_centers1: torch.Tensor, bin_centers2: torch.Tensor, prior_B_x0_c: torch.Tensor, prior_B_ls: torch.Tensor, noise: float = 1e1*EPS) -> torch.Tensor:
     '''
     Computes the bin matrix, B, of shape (B+1) x (B+1)
 
@@ -63,7 +63,6 @@ def get_C_factor(prior_C_Q):
 
     # N x K matrix
     return torch.softmax(prior_C_Q, dim=1)
-
 
 def get_D_factor(dim):
     '''

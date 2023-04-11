@@ -6,7 +6,7 @@ from utils import pairIdx2flatIdx
 
 class Animation:
 
-    def __init__(self, embs, frame_times: np.asarray = None, data: tuple = (None, None),
+    def __init__(self, embs, frame_times: np.asarray = None, data: tuple = (None, None), directed=False,
                  figsize=(12, 10), node_sizes=100, node2color: list = None,
                  color_palette="rocket_r", padding=0.1, fps=6,):
 
@@ -15,22 +15,22 @@ class Animation:
         self._fps = fps
 
         # Data properties
-        self._embs = embs
+        self._embs_s = embs[0]
+        self._embs_r = embs[1] if directed else None
         self._frame_times = frame_times
         pair2id, self._event_pairs, self._event_times = dict(), [], []
         for pair, e in zip(data[0], data[1]):
-            pair_idx = pairIdx2flatIdx(pair[0], pair[1], embs.shape[1])
+            pair_idx = pairIdx2flatIdx(pair[0], pair[1], self._embs_s.shape[1], directed=directed)
             if pair_idx not in pair2id:
                 pair2id[pair_idx] = len(pair2id)
                 self._event_pairs.append(pair)
                 self._event_times.append([e])
             else:
                 self._event_times[pair2id[pair_idx]].append(e)
-        # self._event_pairs = data[0]
-        # self._event_times = data[1]
-        self._frames_num = embs.shape[0]
-        self._nodes_num = embs.shape[1]
-        self._dim = embs.shape[2]
+        self._directed = directed
+        self._frames_num = self._embs_s.shape[0]
+        self._nodes_num = self._embs_s.shape[1]
+        self._dim = self._embs_s.shape[2]
 
         # Visual properties
         sns.set_theme(style="ticks")
@@ -44,36 +44,54 @@ class Animation:
         self._padding = padding
 
     def _render(self, fig, repeat=False):
-        global sc, ax
+        global sc, sc_r, ax
 
         def __set_canvas():
 
-            xy_min = self._embs.min(axis=0, keepdims=False).min(axis=0, keepdims=False)
-            xy_max = self._embs.max(axis=0, keepdims=False).max(axis=0, keepdims=False)
+            xy_min = self._embs_s.min(axis=0, keepdims=False).min(axis=0, keepdims=False)
+            xy_max = self._embs_s.max(axis=0, keepdims=False).max(axis=0, keepdims=False)
+            if self._directed:
+                xy_min_r = self._embs_r.min(axis=0, keepdims=False).min(axis=0, keepdims=False)
+                xy_max_r = self._embs_r.max(axis=0, keepdims=False).max(axis=0, keepdims=False)
+
+                xy_min = np.minimum(xy_min, xy_min_r)
+                xy_max = np.maximum(xy_max, xy_max_r)
+
             xlen_padding = (xy_max[0] - xy_min[0]) * self._padding
             ylen_padding = (xy_max[1] - xy_min[1]) * self._padding
             ax.set_xlim([xy_min[0] - xlen_padding, xy_max[0] + xlen_padding])
             ax.set_ylim([xy_min[1] - ylen_padding, xy_max[1] + ylen_padding])
 
         def __init_func():
-            global sc, ax
+            global sc, sc_r, ax
 
             sc = ax.scatter(
                 [0]*self._nodes_num, [0]*self._nodes_num,
                 s=self._node_sizes, c=self._node_colors,
                 linewidths=self._linewidths, edgecolors=self._edgecolors
             )
+            sc_r = None
+            if self._directed:
+                sc_r = ax.scatter(
+                    [0]*self._nodes_num, [0]*self._nodes_num,
+                    s=self._node_sizes, c=self._node_colors,
+                    linewidths=self._linewidths, edgecolors=self._edgecolors,
+                    marker='>'
+                )
 
             __set_canvas()
 
         def __func(f):
-            global sc, ax
+            global sc, sc_r, ax
 
             for line in list(ax.lines):
                 ax.lines.remove(line)
 
             # Plot the nodes
-            sc.set_offsets(np.c_[self._embs[f, :, 0], self._embs[f, :, 1]])
+            sc.set_offsets(np.c_[self._embs_s[f, :, 0], self._embs_s[f, :, 1]])
+            
+            if self._directed:
+                sc_r.set_offsets(np.c_[self._embs_r[f, :, 0], self._embs_r[f, :, 1]])
 
             # Plot the event links
             if self._event_times is not None and self._event_pairs is not None:
@@ -97,29 +115,39 @@ class Animation:
                         if idx == len(pair_events)-1:
                             alpha = 1
                         else:
-                            assert self._frame_times[f] >= pair_events[idx], "OHA!"
+                            assert self._frame_times[f] >= pair_events[idx], f"OHA! {self._frame_times[f]}, {pair_events[idx]}"
                             alpha = 1 - (self._frame_times[f]-pair_events[idx])/(pair_events[idx+1]-pair_events[idx])
 
-                        ax.plot(
-                            [self._embs[f, i, 0], self._embs[f, j, 0]],
-                            [self._embs[f, i, 1], self._embs[f, j, 1]],
-                            color='k',
-                            alpha=alpha
-                        )
+                        if self._directed:
+                            ax.plot(
+                                [self._embs_s[f, i, 0], self._embs_r[f, j, 0]],
+                                [self._embs_s[f, i, 1], self._embs_r[f, j, 1]],
+                                color='k',
+                                alpha=alpha
+                            )
+                        else:
+                            ax.plot(
+                                [self._embs_s[f, i, 0], self._embs_s[f, j, 0]],
+                                [self._embs_s[f, i, 1], self._embs_s[f, j, 1]],
+                                color='k',
+                                alpha=alpha
+                            )
 
         anim = animation.FuncAnimation(
             fig=fig, init_func=__init_func, func=__func, frames=self._frames_num, interval=200, repeat=repeat
         )
-
+        
         return anim
 
     def save(self, filepath, format="mp4"):
-        global sc, ax
+        global sc, sc_r, ax
 
         fig, ax = plt.subplots(figsize=self._figsize, frameon=True)
-        ax.set_axis_off()
+        # ax.set_axis_off()
+        # Add a legend
 
         self._anim = self._render(fig)
+        
 
         # fig.set_size_inches(y_max-y_min, x_max-x_min, )
         if format == "mp4":

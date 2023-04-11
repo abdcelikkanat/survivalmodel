@@ -1,221 +1,271 @@
 import os
 import torch
-import numpy as np
+import utils
 import pickle as pkl
 from src.sdp import SurviveDieProcess
 from src.base import BaseModel
-import utils
+from utils import prior
 
 
-class InitialPositionVelocitySampler:
+class ConstructionModel(torch.nn.Module):
 
-    def __init__(self, dim: int, bins_num: int, cluster_sizes: list,
-                 prior_lambda: float, prior_sigma: float, prior_B_x0_c: float, prior_B_ls: float,
-                 device: torch.device = "cpu", verbose: bool = False, seed: int = 0):
+    def __init__(self, cluster_sizes: list, bins_num: int, dim: int, directed: bool,
+                prior_lambda: float, prior_sigma_s: float, prior_sigma_r: float, 
+                prior_B_x0_logit_c_s: float, prior_B_x0_logit_c_r: float, prior_B_ls_s: float, prior_B_ls_r: float, 
+                device: torch.device = "cpu", verbose: bool = False, seed: int = 0):
 
+        super(ConstructionModel, self).__init__()
+
+        # Set the model parameters
+        self.__nodes_num = sum(cluster_sizes)
+        self.__cluster_sizes = cluster_sizes
+        self.__k = len(cluster_sizes)
         self.__dim = dim
         self.__bins_num = bins_num
-        self.__cluster_sizes = cluster_sizes
-        self.__prior_lambda = prior_lambda
-        self.__prior_sigma = prior_sigma
-        self.__prior_B_ls = prior_B_ls
-        self.__prior_B_x0_c = prior_B_x0_c
-        self.__time_interval_lengths = [1]*bins_num
+        self.__directed = directed
 
-        self.__nodes_num = sum(cluster_sizes)
-        self.__K = len(cluster_sizes)
+        # Set the prior hyperparameters
+        self.__prior_lambda = torch.as_tensor(prior_lambda, dtype=torch.float, device=device)
+        self.__prior_sigma_s = torch.as_tensor(prior_sigma_s, dtype=torch.float, device=device)
+        self.__prior_sigma_r = torch.as_tensor(prior_sigma_r, dtype=torch.float, device=device) if self.__directed else None
+        self.__prior_B_x0_logit_c_s = torch.as_tensor(prior_B_x0_logit_c_s, dtype=torch.float, device=device)
+        self.__prior_B_x0_logit_c_r = torch.as_tensor(prior_B_x0_logit_c_r, dtype=torch.float, device=device) if self.__directed else None
+        self.__prior_B_ls_s = torch.as_tensor(prior_B_ls_s, dtype=torch.float, device=device)
+        self.__prior_B_ls_r = torch.as_tensor(prior_B_ls_r, dtype=torch.float, device=device) if self.__directed else None
 
+        # Construct the Q matrix for the node matrix C, (nodes)
+        self.__prior_C_Q_s = -utils.INF * torch.ones(size=(self.__nodes_num, self.__k), dtype=torch.float)
+        for k in range(self.__k):
+            self.__prior_C_Q_s[sum(self.__cluster_sizes[:k]):sum(self.__cluster_sizes[:k + 1]), k] = 0
+        self.__prior_C_Q_r = self.__prior_C_Q_s if self.__directed else None
+        
+        #
         self.__device = device
         self.__verbose = verbose
         self.__seed = seed
 
-
-    def get_B_factor(self, bin_centers1: torch.Tensor, bin_centers2: torch.Tensor,
-                     prior_B_x0_c: torch.Tensor, prior_B_ls: torch.Tensor, only_kernel=False):
-
-        prior_B_x0_c_sq = prior_B_x0_c ** 2
-        time_mat = bin_centers1 - bin_centers2.T
-        # prior_B_ls = torch.clamp(prior_B_ls, min=-1./bin_centers1.shape[1], max=1./bin_centers1.shape[1])
-        # prior_B_ls = torch.clamp(prior_B_ls, min=-1e+2, max=1e+2)
-        B_ls_sq = prior_B_ls ** 2
-        kernel = torch.exp(-torch.div(time_mat ** 2, B_ls_sq)/2.0)
-
-        # Combine the entry required for x0 with the velocity vectors covariance
-        kernel = torch.block_diag(prior_B_x0_c_sq, kernel)
-
-        # Add a constant term to get rid of computational problems and singularity
-        kernel = kernel + (10*utils.EPS) * torch.eye(n=kernel.shape[0], m=kernel.shape[1])
-
-        if only_kernel:
-            return kernel
-
-        # B x B lower triangular matrix
-        L = torch.linalg.cholesky(kernel)
-
-        return L
+        #
+        self.__bm = None
+        self.__data = None 
         
-    def get_C_factor(self, prior_C_Q):
-        # N x K matrix
-        return torch.softmax(prior_C_Q, dim=1)
+        self.__bm, self.__data = self.sample_graph()
 
-    def get_D_factor(self, dim):
-        # D x D matrix
-        return torch.eye(dim)
+    def sample_graph(self):
+        '''
+        Sample a new graph
+        '''
 
-    def sample(self):
+        # Define the number of pairs that can have an event
+        pairs_num = self.__nodes_num*(self.__nodes_num-1)  if self.__directed else self.__nodes_num*(self.__nodes_num-1)//2
 
-        # Get the factor of B matrix, (bins)
-        bin_centers = torch.arange(0.5, 0.5*(self.__bins_num+1), 0.5).view(1, self.__bins_num)
+        # Constuct the node pairs
+        node_pairs = torch.triu_indices(self.__nodes_num, self.__nodes_num, offset=1, device=self.__device)
+        # If directed, add the lower triangular part
+        if self.__directed:
+            node_pairs = torch.cat((
+                node_pairs, torch.tril_indices(self.__nodes_num, self.__nodes_num, offset=-1, device=self.__device
+            )), dim=1)
+        
+        # Set the initial states
+        init_states = torch.zeros(size=(pairs_num, ), device=self.__device, dtype=torch.int)
+        
+        # Sample the initial position and velocity tensors
+        x0_s, v_s, x0_r, v_r = self.sample_x0_and_v()
 
-        # Construct the factor of B matrix (bins)
-        B_factor = self.get_B_factor(
-            bin_centers1=bin_centers, bin_centers2=bin_centers,
-            prior_B_x0_c=torch.as_tensor(self.__prior_B_x0_c, dtype=torch.float),
-            prior_B_ls=torch.as_tensor(self.__prior_B_ls),
+        # Sample the bias tensors
+        beta_s = 0*torch.randn(size=(self.__nodes_num, 2), dtype=torch.float, device=self.__device,)
+        beta_r = 0*torch.randn(size=(self.__nodes_num, 2), dtype=torch.float, device=self.__device) if self.__directed else None
+
+        bm = BaseModel(
+            x0_s = x0_s, v_s = v_s, beta_s = beta_s, 
+            init_states=init_states, directed = self.__directed, prior_lambda = self.__prior_lambda,
+            prior_sigma_s = self.__prior_sigma_s, prior_B_x0_logit_c_s = self.__prior_B_x0_logit_c_s, 
+            prior_B_ls_s = self.__prior_B_ls_s, prior_C_Q_s = self.__prior_C_Q_s, prior_R_factor_inv_s = None,
+            x0_r = x0_r, v_r = v_r, beta_r = beta_r,
+            prior_sigma_r = self.__prior_sigma_r, prior_B_x0_logit_c_r = self.__prior_B_x0_logit_c_r, 
+            prior_B_ls_r = self.__prior_B_ls_r, prior_C_Q_r = self.__prior_C_Q_r,  prior_R_factor_inv_r = None,
+            device=self.__device, verbose = self.__verbose, seed=self.__seed
         )
 
-        # Get the factor of C matrix, (nodes)
-        prior_C_Q = torch.zeros(size=(self.__nodes_num, self.__K), dtype=torch.float)
-        for k in range(self.__K):
-            prior_C_Q[sum(self.__cluster_sizes[:k]):sum(self.__cluster_sizes[:k + 1]), k] = 1
-        C_factor = self.get_C_factor(prior_C_Q)
+        pair_events, pair_states = self.__sample_events(bm=bm, node_pairs=node_pairs)
 
-        # Get the factor of D matrix, (dimension)
-        D_factor = self.get_D_factor(dim=self.__dim)
+        tiplets = [(tuple(pair), event, state) for pair in node_pairs.T.tolist() for event, state in zip(pair_events[(pair[0], pair[1])], pair_states[(pair[0], pair[1])])]
+        pairs, events, states = zip(*sorted(tiplets, key=lambda tri: tri[1]))
+        data = list(pairs), torch.as_tensor(events, dtype=torch.float), torch.as_tensor(states, dtype=torch.int8), self.__directed, 0, 1.0
 
-        # Sample the initial position and velocity vectors
+        return bm, data
+
+    def sample_x0_and_v(self):
+        '''
+        Sample the initial position and velocity of the nodes
+        For directed graphs, B matrix (bins) are only different
+
+        '''
+
+        # Define the bin centers
+        bin_centers = torch.arange(0.5/self.__bins_num, 1.0, 1.0/self.__bins_num).unsqueeze(0)
+
+        # Define the final dimension size
         final_dim = self.__nodes_num * (self.__bins_num+1) * self.__dim
-        cov_factor = self.__prior_lambda * torch.kron(
-            B_factor.contiguous(), torch.kron(C_factor, D_factor.contiguous())
-        )
-        cov_diag = (self.__prior_lambda ** 2) * (self.__prior_sigma ** 2) * torch.ones(final_dim)
-        lmn = torch.distributions.LowRankMultivariateNormal(
+        
+        # Construct the factor of B matrix (bins)
+        B_factor_s = prior.get_B_factor(bin_centers, bin_centers, self.__prior_B_x0_logit_c_s, self.__prior_B_ls_s)
+        # Construct the factor of C matrix (nodes)
+        C_factor_s = prior.get_C_factor(self.__prior_C_Q_s)
+        # Get the factor of D matrix, (dimension)
+        D_factor_s = prior.get_D_factor(dim=self.__dim)
+
+        # Sample from the low rank multivariate normal distribution
+        # covariance_matrix = cov_factor @ cov_factor.T + cov_diag
+        cov_factor_s = self.__prior_lambda * torch.kron(B_factor_s.contiguous(), torch.kron(C_factor_s, D_factor_s))
+        cov_diag_s = (self.__prior_lambda**2) * (self.__prior_sigma_s**2) * torch.ones(size=(final_dim, ), dtype=torch.float, device=self.__device)
+        # Sample from the low rank multivariate normal distribution
+        sample_s = torch.distributions.LowRankMultivariateNormal(
             loc=torch.zeros(size=(final_dim,)),
-            cov_factor=cov_factor,
-            cov_diag=cov_diag
+            cov_factor=cov_factor_s,
+            cov_diag=cov_diag_s
+        ).sample().reshape(shape=(self.__bins_num+1, self.__nodes_num, self.__dim))
+
+        # Split the tensor into x0 and v
+        x0_s, v_s = torch.split(sample_s, [1, self.__bins_num])
+        x0_s = x0_s.squeeze(0)
+        
+        if self.__directed:
+
+            # Construct the factor of B matrix (bins)
+            B_factor_r = prior.get_B_factor(bin_centers, bin_centers, self.__prior_B_x0_logit_c_r, self.__prior_B_ls_r)
+            # Construct the factor of C matrix (nodes)
+            C_factor_r = prior.get_C_factor(self.__prior_C_Q_r)
+            # Get the factor of D matrix, (dimension)
+            D_factor_r = prior.get_D_factor(dim=self.__dim)
+
+            # Sample from the low rank multivariate normal distribution
+            # covariance_matrix = cov_factor @ cov_factor.T + cov_diag
+            cov_factor_r = self.__prior_lambda * torch.kron(B_factor_r.contiguous(), torch.kron(C_factor_r, D_factor_r))
+            cov_diag_r = (self.__prior_lambda**2) * (self.__prior_sigma_r**2) * torch.ones(size=(final_dim, ), dtype=torch.float, device=self.__device)
+
+            # Sample from the low rank multivariate normal distribution
+            sample_r = torch.distributions.LowRankMultivariateNormal(
+                loc=torch.zeros(size=(final_dim,)),
+                cov_factor=cov_factor_r,
+                cov_diag=cov_diag_r
+            ).sample().reshape(shape=(self.__bins_num+1, self.__nodes_num, self.__dim))
+
+            # Split the tensor into x0 and v
+            x0_r, v_r = torch.split(sample_r, [1, self.__bins_num])
+            x0_r = x0_r.squeeze(0)
+        
+        else:
+            x0_r, v_r = None, None
+
+
+        return utils.standardize(x0_s), utils.standardize(v_s), utils.standardize(x0_r), utils.standardize(v_r)
+
+
+    def __sample_events(self, node_pairs: torch.Tensor, bm: BaseModel) -> dict:
+
+        # Construct a dictionary of dictionaries to store the events times
+        pair_events = {tuple(pair): [] for pair in node_pairs.T.tolist()}
+        pair_states = {tuple(pair): [] for pair in node_pairs.T.tolist()}
+
+        # Get the positions at the beginning of each time bin for every node
+        rt_s = bm.get_rt_s(
+            time_list=bm.get_bin_bounds()[:-1].repeat(self.__nodes_num), 
+            nodes=torch.repeat_interleave(torch.arange(self.__nodes_num), repeats=self.__bins_num)
         )
+        rt_s = rt_s.reshape((self.__nodes_num, self.__bins_num,  self.__dim)).transpose(0, 1)
+        if self.__directed:
+            rt_r = bm.get_rt_r(
+                time_list=bm.get_bin_bounds()[:-1].repeat(self.__nodes_num), 
+                nodes=torch.repeat_interleave(torch.arange(self.__nodes_num), repeats=self.__bins_num)
+            ).reshape((self.__nodes_num, self.__bins_num,  self.__dim)).transpose(0, 1)
+        else:
+            rt_r = rt_s
 
-        sample = lmn.sample().reshape(shape=(self.__bins_num + 1, self.__nodes_num, self.__dim))
+        for pair in node_pairs.T:
 
-        x0, v = torch.split(sample, [1, self.__bins_num])
-        x0 = x0.squeeze(0)
+            i, j = pair.tolist()
 
-        return x0, v, (1.0 * self.__bins_num)
+            # Define the intensity function for each node pair (i,j)
+            intensity_func = lambda t, state: bm.get_intensity_at(
+                time_list=torch.as_tensor([t]), pairs=pair.unsqueeze(1), states=torch.as_tensor([state]).type(torch.long)
+            ).item()
+
+            # Get the flat index of the pair
+            flat_idx = utils.pairIdx2flatIdx(i, j, self.__nodes_num, directed=self.__directed)
+
+            # Get the critical points
+            v_s = bm.get_v_s()
+            v_r = bm.get_v_r() if self.__directed else v_s
+            critical_points = self.__get_critical_points(i=i, j=j, bin_bounds=bm.get_bin_bounds(), rt_s=rt_s, rt_r=rt_r, v_s=v_s, v_r=v_r)
+
+            # Get the state
+            initial_state = bm.get_init_states(flat_idx)
+
+            # Simulate the Survive or Die Process
+            nhpp_ij = SurviveDieProcess(
+                lambda_func=intensity_func, initial_state=initial_state, critical_points=critical_points,
+                seed=self.__seed + flat_idx
+            )
+            ij_edge_times, ij_edge_states = nhpp_ij.simulate()
+            # Add the event times
+            pair_events[(i, j)].extend(ij_edge_times)
+            pair_states[(i, j)].extend(ij_edge_states)
+
+        return pair_events, pair_states
 
 
-class ConstructionModel(BaseModel):
-
-    def __init__(self, x0: torch.Tensor, v: torch.Tensor, beta: torch.Tensor,
-                 init_states: torch.tensor, last_time: float, bins_num: int,
-                 device: torch.device = "cpu", verbose: bool = False, seed: int = 0):
-
-        super(ConstructionModel, self).__init__(
-            x0=x0,
-            v=v,
-            beta=beta,
-            init_states=init_states,
-            last_time=last_time,
-            bins_num=bins_num,
-            device=device,
-            verbose=verbose,
-            seed=seed
-        )
-
-        self.__events = self.__sample_events()
-
-    def __get_critical_points(self, i: int, j: int, x: torch.tensor):
-
-        bin_bounds = self.get_bins_bounds()
+    def __get_critical_points(self, i: int, j: int, bin_bounds: torch.Tensor, rt_s: torch.Tensor, rt_r: torch.Tensor, v_s: torch.Tensor, v_r: torch.Tensor) -> tuple:
 
         # Add the initial time point
-        critical_points = ([], [])
+        critical_points = []
 
-        for idx in range(self.get_bins_num()):
+        for idx in range(self.__bins_num):
 
             interval_init_time = bin_bounds[idx]
             interval_last_time = bin_bounds[idx+1]
 
             # Add the initial time point of the interval
-            critical_points[0].append(float(interval_init_time))
-            critical_points[1].append(float(interval_init_time))
+            critical_points.append(interval_init_time)
 
             # Get the differences
-            delta_idx_x = x[idx, i, :] - x[idx, j, :]
-            delta_idx_v = self.get_v()[idx, i, :] - self.get_v()[idx, j, :]
+            delta_idx_x = rt_s[idx, i, :] - rt_r[idx, j, :]
+            delta_idx_v = v_s[idx, i, :] - v_r[idx, j, :] 
 
             # For the model containing only position and velocity
             # Find the point in which the derivative equal to 0
-            t = - np.dot(delta_idx_x, delta_idx_v) / (np.dot(delta_idx_v, delta_idx_v) + utils.EPS) + interval_init_time
+            t = - torch.dot(delta_idx_x, delta_idx_v) / (torch.dot(delta_idx_v, delta_idx_v) + utils.EPS) + interval_init_time
 
             if interval_init_time < t < interval_last_time:
-                critical_points[0].append(float(t))
-                critical_points[1].append(float(t))
+                critical_points.append(t)
 
         # Add the last time point
-        critical_points[0].append(float(bin_bounds[-1]))
-        critical_points[1].append(float(bin_bounds[-1]))
+        critical_points.append(bin_bounds[-1])
 
         return critical_points
 
-    def __sample_events(self, nodes: torch.tensor = None) -> dict:
+    def get_data(self):
 
-        if nodes is not None:
-            raise NotImplementedError("It must be implemented for given specific nodes!")
+        return self.__data
 
-        node_pairs = torch.triu_indices(
-            row=self.get_number_of_nodes(), col=self.get_number_of_nodes(), offset=1, device=self.get_device()
-        )
+    def get_model(self):
 
-        # Upper triangular matrix of lists
-        events_time = {
-            i: {j: [] for j in range(i+1, self.get_number_of_nodes())} for i in range(self.get_number_of_nodes()-1)
-        }
-        # Get the positions at the beginning of each time bin for every node
-        rt = self.get_rt(
-            time_list=self.get_bins_bounds()[:-1].repeat(self.get_number_of_nodes()), 
-            nodes=torch.repeat_interleave(torch.arange(self.get_number_of_nodes()), repeats=self.get_bins_num())
-        ).reshape((self.get_number_of_nodes(), self.get_bins_num(),  self.get_dim())).transpose(0, 1)
+        return self.__bm
 
+    def save_data(self, file_path: str):
 
-        for i, j in zip(node_pairs[0], node_pairs[1]):
-            # Define the intensity function for each node pair (i,j)
-            intensity_func = lambda t, state: self.get_intensity_at(
-                time_list=torch.as_tensor([t]), pairs=torch.as_tensor([[i], [j]]), states=torch.as_tensor([state]).type(torch.long)
-            ).item()
+        with open(file_path, 'wb') as f:
+            pkl.dump(self.__data, f)
 
-            # Get the critical points
-            critical_points = self.__get_critical_points(i=i, j=j, x=rt)
-            # Get the state
-            initial_state = self.get_init_states(pair_idx=utils.pairIdx2flatIdx(i=i, j=j, n=self.get_number_of_nodes()).type(torch.long))
-            # Simulate the Survive or Die Process
-            nhpp_ij = SurviveDieProcess(
-                lambda_func=intensity_func, initial_state=initial_state, critical_points=critical_points,
-                seed=self.get_seed() + i * self.get_number_of_nodes() + j
-            )
-            ij_events_time = nhpp_ij.simulate()
-            # Add the event times
-            events_time[i.item()][j.item()].extend(ij_events_time)
+    def save_model(self, file_path: str):
 
-        return events_time
+        with open(file_path, 'wb') as f:
+            pkl.dump(self.__bm, f)
 
-    def get_events(self):
-
-        return self.__events
-
-    def save(self, folder_path, normalize=False):
-        events, pairs = [], []
-        for i, j in utils.pair_iter(n=self.get_number_of_nodes()):
-            pair_events = self.__events[i][j]
-            if normalize:
-                pair_events = [e / self.get_last_time() for e in pair_events]
-            for e in pair_events:
-                pairs.append((i, j))
-                events.append(e)
-
-        with open(os.path.join(folder_path, "pairs.pkl"), 'wb') as f:
-            pkl.dump(pairs, f)
-
-        with open(os.path.join(folder_path, "events.pkl"), 'wb') as f:
-            pkl.dump(events, f)
-
-
+    def write_edges(self, file_path: str):
+        '''
+        Write the edges
+        '''
+        with open(file_path, 'w') as f:
+            for pair, event_time, state in zip(self.__data[0], self.__data[1], self.__data[2]):
+                f.write(f"{pair[0]} {pair[1]} {event_time} {state}\n")

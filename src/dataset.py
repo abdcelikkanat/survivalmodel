@@ -1,269 +1,178 @@
 import re
-import math
+from utils.common import INF
+import torch
 
 class Dataset:
 
-    def __init__(self, edge_file: str = None) -> None:
-        
-        self.__edges, self.__nodes_num, self.__min_value, self.__max_value = self.read_edgelist(edge_file)
+    def __init__(self, nodes_num = 0, edges: torch.LongTensor = None, edge_times: torch.FloatTensor = None, 
+                edge_states: torch.FloatTensor = None, init_time:float = None, last_time:float = None, verbose=False):
 
+        self.__nodes_num = nodes_num
+        self.__edges = edges
+        self.__edge_times = edge_times
+        self.__edge_states = edge_states
+        self.__init_time = init_time
+        self.__last_time = last_time
+        self.__verbose = verbose
+        
     def read_edgelist(self, file_path):
         '''
+        Read the edge list file
         :param file_path: path of the file 
         '''
         
-        min_value, max_value = math.inf, -math.inf
-        edges, nodes = [], []
+        min_value, max_value = INF, -INF
+        data = []
         with open(file_path, 'r') as f:
             for line in f.readlines():
                 # Discard the lines starting with #
-                if line[0] != '#':
+                if line[0] == '#':
+                    pass
+
+                # Lines starting with > provide the information about the initial and last time
+                elif line[0] == '>':
+            
+                    tokens = tuple( float(value) for value in line[1:].strip().split() )
+                    self.__init_time, self.__last_time = tokens[0], tokens[1]
+
+                else:
                     
                     # Split the line into a list of strings
                     tokens = re.split(';|,| |\n', line.strip())
-                    edges.append( tuple( int(token) for token in tokens[:-1] ) )
+                    # Convert the values to float values
+                    current_line = tuple( float(token) for token in tokens )
 
-                    try:
-                        edges[-1] = edges[-1] + (int(tokens[-1]), )
-                    except ValueError:
-                        edges[-1] = edges[-1] + (float(tokens[-1]), )
+                    # Add the edge
+                    data.append(current_line)
 
-                    # Add the nodes
-                    nodes.append(int(tokens[0]))
-                    nodes.append(int(tokens[1]))
+        # Construct a tensor from the list
+        data = torch.as_tensor(data, dtype=torch.float)
 
-                    # Get the min and max values
-                    min_value = min(min_value, edges[-1][-1])
-                    max_value = max(max_value, edges[-1][-1])
+        # Get the shape of the data
+        edges_num, data_dim = data.shape
+
+        # Split the columns
+        self.__edges = data[:, :2].to(torch.long)
+        self.__edge_times = data[:, 2]
+        self.__edge_states = data[:, 3] if data_dim > 3 else None
+
+        # Get the nodes
+        nodes = torch.unique(self.__edges)
+
+        # Check the minimum and maximum node labels
+        assert min(nodes) == 0, f"The nodes must be numbered from 0 to N-1, min node: {min(nodes)}/{len(nodes)}."
+        assert max(nodes) + 1 == len(nodes), f"The nodes must be numbered from 0 to N-1, max node: {max(nodes)}/{len(nodes)}."
         
-        nodes = list(set(nodes))
-        assert min(nodes) == 0, f"The nodes must be numbered from 0 to N-1, min node: {min(nodes)}."
-        assert max(nodes) + 1 == len(nodes), f"The nodes must be numbered from 0 to N-1, max node: {max(nodes)}."
+        # Construct a node list
+        nodes = torch.unique(self.__edges)
+        self.__nodes_num = len(nodes)
 
-        # Set the number of nodes
-        nodes_num = len(nodes)
+        # Sort the edges
+        sorted_indices = self.__edge_times.argsort()
+        self.__edges = self.__edges[sorted_indices, :]
+        self.__edge_times = self.__edge_times[sorted_indices]
+        self.__edge_states = None if self.__edge_states is None else self.__edge_states[sorted_indices]
 
-        return edges, nodes_num, min_value, max_value
+        # If the minimum and maximum time are not given, set them
+        if self.__init_time is None:
+            self.__init_time = self.__edge_times.min()
+        if self.__last_time is None:
+            self.__last_time = self.__edge_times.max()
 
-    def get_edges(self):
-        return self.__edges
+        if self.__verbose:
+            print(f"Number of nodes: {self.__nodes_num}")
+            print(f"Number of edges: {edges_num}")
+            print(f"Initial time: {self.__init_time}")
+            print(f"Last time: {self.__last_time}")
+
+    def get_edges(self) -> torch.Tensor:
+        '''
+        Get the edges
+        '''
+        if self.__edge_states is None:
+            return zip(map(tuple, self.__edges.tolist()), self.__edge_times.tolist())
+        else:
+            return zip(map(tuple, self.__edges.tolist()), self.__edge_times.tolist(), self.__edge_states.tolist())
     
-    def get_nodes_num(self):
+    def get_nodes_num(self) -> int:
+        '''
+        Get the number of nodes
+        '''
         return self.__nodes_num
 
-    def get_min_value(self):
-        return self.__min_value
+    def split_over_time(self, split_ratio: float = 0.9, remove_isolated_nodes: bool = True):
+        '''
+        Split the edges over time
+        :param split_ratio: ratio of the edges in the first split
+        :param keep_isolated_nodes: if True, the isolated nodes are kept in the first split (if exists)
+        '''
 
-    def get_max_value(self):
-        return self.__max_value
+        # Get the min and max time
+        split_time = (self.__last_time - self.__init_time) * split_ratio + self.__init_time
+        if self.__verbose:
+            print(f"Split time: {split_time}")
 
-# class Dataset:
+        # Get the indices of the edges with time less than the split time
+        split_index = torch.searchsorted(self.__edge_times, split_time)
 
-#     def __init__(self, path: str = None, data: tuple = None, normalize: bool = True,
-#                  verbose: bool = True, seed: int = 19):
+        # Split the edges
+        # First split
+        edges1 = self.__edges[:split_index, :]
+        edge_times1 = self.__edge_times[:split_index]
+        edge_states1 = None if self.__edge_states is None else self.__edge_states[:split_index] 
+        
+        init_time1 = self.__init_time
+        last_time1 = split_time
 
-#         self.__events = None
-#         self.__pairs = None
-#         self.__node2group = None
-#         self.__nodes_num = 0
-#         self.__nodes = []
-#         self.__verbose = verbose
+        # Second split
+        edges2 = self.__edges[split_index:, :]
+        edge_times2 = self.__edge_times[split_index:]
+        edge_states2 = None if self.__edge_states is None else self.__edge_states[split_index:] 
 
-#         assert path is None or data is None, "Path and data parameter cannot be set at the same time!"
+        init_time2 = split_time
+        last_time2 = self.__last_time
 
-#         if path is not None:
-#             self.read(path, normalize=normalize)
+        nodes_num = self.__nodes_num
 
-#         if data is not None:
-#             self.__events = data[0]
-#             self.__pairs = data[1]
+        # Remove the isolated nodes in the (undirected version of) the graph
+        if remove_isolated_nodes:
 
-#             self.__nodes = data[2]
-#             self.__nodes_num = len(self.__nodes)
+            # Get the isolated nodes in the first split
+            nonisolated_nodes = torch.sort(torch.unique(edges1))[0]
 
-#             if len(data) > 3:
-#                 self.__node2group = data[3]
+            # Check if there are isolated nodes in the first split, if so, relabel the edges
+            if len(nonisolated_nodes) < self.__nodes_num:
+                new_labels = torch.zeros(self.__nodes_num, dtype=torch.long)
+                new_labels[nonisolated_nodes] = torch.arange(len(nonisolated_nodes), dtype=torch.long)
 
-#             if self.__verbose:
-#                 self.print_statistics()
+                # Relabel the edges in the first split
+                ### Note that there is no need to remove any edges from the first split
+                edges1[:, 0], edges1[:, 1] = new_labels[edges1[:, 0]], new_labels[edges1[:, 1]]
 
-#             if normalize:
-#                 self.__normalize_events()
+                # Remove the edges in the second split, containing isolated nodes
+                mask = (edges2[:, 0].unsqueeze(1) == nonisolated_nodes).any(dim=1) & (edges2[:, 1].unsqueeze(1) == nonisolated_nodes).any(dim=1)
+                edges2 = edges2[mask, :]
+                edge_times2 = edge_times2[mask]
+                edge_states2 = None if edge_states2 is None else edge_states2[mask]
 
-#         # Set the seed value
-#         set_seed(seed=seed)
+                # Relabel the edges in the second split
+                edges2[:, 0], edges2[:, 1] = new_labels[edges2[:, 0]], new_labels[edges2[:, 1]]
 
-#     def read(self, path, normalize=True):
+                nodes_num = len(nonisolated_nodes)
 
-#         with open(os.path.join(path, 'events.pkl'), 'rb') as f:
-#             self.__events = list(pkl.load(f))
 
-#         with open(os.path.join(path, 'pairs.pkl'), 'rb') as f:
-#             self.__pairs = np.asarray(pkl.load(f), dtype=int).tolist()
+        ds1 = Dataset(
+            nodes_num = nodes_num, edges=edges1, edge_times=edge_times1, 
+            edge_states=edge_states1, init_time=init_time1, last_time=last_time1
+        )
+        ds2 = Dataset(
+            nodes_num = nodes_num, edges=edges2, edge_times=edge_times2, 
+            edge_states=edge_states2, init_time=init_time2, last_time=last_time2
+        )
 
-#         self.__nodes = np.unique(self.__pairs).tolist()
-#         self.__nodes_num = len(self.__nodes)
+        return ds1, ds2
 
-#         if self.__verbose:
-#             self.print_statistics()
 
-#         if normalize:
-#             self.__normalize_events()
+    def split(self, train_ratio=0.8, valid_ratio=0.1, test_ratio=0.1):
 
-#         # Read the file storing the groups of nodes if exists
-#         node2group_file_path = os.path.join(path, 'node2group.pkl')
-#         if os.path.exists(node2group_file_path):
-#             with open(node2group_file_path, 'rb') as f:
-#                 self.__node2group = pkl.load(f)
-
-#     def __normalize_events(self):
-
-#         min_time = self.get_min_event_time()
-#         max_time = self.get_max_event_time()
-
-#         if min_time != 0.0 or max_time != 1.0:
-
-#             if self.__verbose:
-#                 print(f"- The event times are being normalized...")
-#                 print(f"\t+ The minimum time: {min_time}")
-#                 print(f"\t+ The maximum time: {max_time}")
-
-#             for idx, e in enumerate(self.__events):
-#                 self.__events[idx] = (e - min_time ) / float(max_time - min_time)
-
-#     def write(self, folder_path):
-
-#         if not os.path.exists(folder_path):
-#             os.makedirs(folder_path)
-
-#         with open(os.path.join(folder_path, 'events.pkl'), 'wb') as f:
-#             pkl.dump(self.__events, f)
-
-#         with open(os.path.join(folder_path, 'pairs.pkl'), 'wb') as f:
-#             pkl.dump(self.__pairs, f)
-
-#     def __getitem__(self, item):
-
-#         if type(item) is int:
-
-#             return self.__pairs[item], self.__events[item]
-
-#         elif type(item) is tuple or type(item) is list:
-
-#             try:
-#                 idx = self.__pairs.index(list(item))
-#                 return self.__pairs[idx], self.__events[idx]
-
-#             except ValueError:
-#                 return item, []
-
-#         else:
-
-#             raise ValueError("Invalid input type!")
-
-#     def number_of_nodes(self):
-
-#         return self.__nodes_num
-
-#     def number_of_pairs(self):
-
-#         return len(self.__events)
-
-#     def number_of_events(self):
-
-#         return len(self.__events)
-
-#     def get_min_event_time(self):
-
-#         return min(self.__events)
-
-#     def get_max_event_time(self):
-
-#         return max(self.__events)
-
-#     def get_nodes(self):
-
-#         return self.__nodes
-
-#     def get_events(self):
-
-#         return self.__events
-
-#     def get_pairs(self):
-
-#         return self.__pairs
-
-#     def get_groups(self):
-
-#         return self.__node2group
-
-#     def print_statistics(self):
-
-#         print(f"- The dataset statistics:")
-#         print(f"\t+ The number of nodes: {self.number_of_nodes()}")
-#         print(f"\t+ The total number of edges: {self.number_of_events()}")
-#         print(f"\t+ The initial time of the dataset: {self.get_min_event_time()}")
-#         print(f"\t+ The last time of the dataset: {self.get_max_event_time()}")
-
-#     def plot_events(self, nodes: list = None, fig_size: tuple = None, show = True):
-
-#         if nodes is None:
-#             nodes = [0, 1]
-
-#         nodes_num = len(nodes)
-#         nodes = sorted(nodes)
-
-#         pair_indices = [[i, j] for i in range(nodes_num) for j in range(i + 1, nodes_num)]
-#         pairs = [[nodes[i], nodes[j]] for i, j in pair_indices]
-
-#         plt.figure(figsize=fig_size if fig_size is not None else (12, 10))
-
-#         for pairIdx, pair in enumerate(pairs):
-#             _, events = self.__getitem__(pair)
-#             y = len(events) * [pairIdx]
-#             plt.plot(events, y, 'k.')
-
-#         plt.yticks(np.arange(len(pairs)), [f"({pair[0]},{pair[1]})" for pair in pairs])
-
-#         plt.xlabel("Timeline")
-#         plt.ylabel("Node pairs")
-
-#         if show:
-#             plt.show()
-
-#         return plt
-
-#     def plot_samples(self, labels, samples, fig_size: tuple = None):
-
-#         # Plot the events
-#         plt = self.plot_events(nodes=list(range(self.number_of_nodes())), fig_size= fig_size, show=False)
-
-#         # Check if the samples contain event times
-#         assert len(samples[0]) == 3, "Samples do not contain event times!"
-
-#         c = ['r.', 'b.']
-#         for label, sample in zip(labels, samples):
-
-#             plt.plot(sample[2], pairIdx2flatIdx(i=sample[0], j=sample[1], n=self.number_of_nodes()), c[label])
-
-#         plt.show()
-
-#     def get_freq(self):
-
-#         F = np.zeros(shape=(self.__nodes_num, self.__nodes_num), dtype=np.int)
-
-#         for i, j in zip(*np.triu_indices(self.__nodes_num, k=1)):
-#             F[i, j] = len(self[[i, j]][1])
-
-#         return F
-
-#     def info(self):
-
-#         print("- Dataset Information -")
-#         print(f"\tNumber of nodes: {self.number_of_nodes()}")
-#         print(f"\tNumber of events: {self.number_of_total_events()}")
-#         p = round(100 * self.number_of_event_pairs()/(0.5 * self.number_of_nodes() * (self.number_of_nodes() - 1)), 2)
-#         print(f"\tNumber of pairs having at least one event: {self.number_of_event_pairs()} ({p}%)")
-#         print(f"\tAverage number of events per pair: {self.number_of_total_events() / float(len(self.__pairs))}")
-#         print(f"\tMin. time: {self.get_min_event_time()}")
-#         print(f"\tMax. time: {self.get_max_event_time()}")
+        return None

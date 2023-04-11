@@ -1,4 +1,5 @@
 import torch
+import random
 from utils.common import EPS
 
 
@@ -30,6 +31,10 @@ def normalize(x: torch.Tensor):
     return x #x / (torch.norm(x, p='fro', dim=-1, keepdim=True) +  1e-12 )
 
 def standardize(x: torch.Tensor):
+
+    # If the input is None, return None
+    if x == None:
+        return x
 
     if x.dim() == 2:
         return normalize(x - torch.mean(x, dim=0, keepdim=True))

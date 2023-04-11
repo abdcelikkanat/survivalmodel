@@ -68,18 +68,20 @@ nodes=torch.arange(nodes_num).unsqueeze(1).expand(nodes_num, number_of_frames)
 time_list = frame_times.unsqueeze(0).expand(nodes_num, number_of_frames)
 
 rt_s = lm.get_rt_s(time_list=time_list.flatten(), nodes=nodes.flatten())
-# rt_r = lm.get_rt_r(time_list=time_list.flatten(), nodes=nodes.flatten())
+rt_r = lm.get_rt_r(time_list=time_list.flatten(), nodes=nodes.flatten()) if directed else None
 
 
-embs = rt_s.reshape(nodes_num, number_of_frames, dim).transpose(0, 1).detach().numpy()
+embs_s = rt_s.reshape(nodes_num, number_of_frames, dim).transpose(0, 1).detach().numpy()
+embs_r = rt_r.reshape(nodes_num, number_of_frames, dim).transpose(0, 1).detach().numpy() if directed else None
 anim = Animation(
-    embs,
+    embs=(embs_s, embs_r),
     data=(data[0], data[1]),
+    directed=directed,
     fps=12,
     node2color={node:node for node in range(nodes_num)},
     frame_times=frame_times.detach().numpy()
 )
-anim.save(f"./emb_s_{dataset_name}_train_v_x0_seed={seed}.mp4", format="mp4")
+anim.save(f"./models/{dataset_name}_undirected={seed}.mp4", format="mp4")
 
 
 
