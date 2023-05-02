@@ -1,16 +1,17 @@
 import sys
 import math
 import torch
-from src.base import BaseModel
 import time
 import utils
+from src.base import BaseModel
+from src.sampler import BatchSampler
 
 
 class LearningModel(BaseModel, torch.nn.Module):
 
-    def __init__(self, data: tuple, nodes_num: int, bins_num: int, dim: int, k=10, prior_lambda: float = 1e4, directed = False,
-                 lr: float = 0.1, batch_size: int = None, epoch_num: int = 100, steps_per_epoch=10, 
-                 device: torch.device = None, verbose: bool = False, seed: int = 19):
+    def __init__(self, nodes_num: int, directed: bool, bins_num: int, dim: int,
+                 prior_lambda: float = 1e5, k=10, lr: float = 0.1, batch_size: int = None, epoch_num: int = 100, steps_per_epoch=1, 
+                 device: torch.device = 'cpu', verbose: bool = False, seed: int = 19):
 
         utils.set_seed(seed)
 
@@ -31,7 +32,6 @@ class LearningModel(BaseModel, torch.nn.Module):
             prior_C_Q_s = torch.nn.Parameter(2. * torch.rand(size=(nodes_num, k), device=device) - 1,  requires_grad=False), 
             prior_C_Q_r = torch.nn.Parameter(2. * torch.rand(size=(nodes_num, k), device=device) - 1,  requires_grad=False)  if directed else None,
             prior_R_factor_inv_s = None, prior_R_factor_inv_r = None,
-            init_states=torch.nn.Parameter(torch.zeros(size=((nodes_num-1)*nodes_num//2, ), device=device), requires_grad=False),
             directed=directed,
             device=device,
             verbose=verbose,
@@ -41,91 +41,14 @@ class LearningModel(BaseModel, torch.nn.Module):
         # Optimization parameters
         self.__lp = "sequential" # Learning procedure
         self.__lr = lr # Learning rate
-        self.__epoch_num = epoch_num # Number of epochs
         self.__batch_size = nodes_num if batch_size is None else batch_size # Batch size
+        self.__epoch_num = epoch_num # Number of epochs
         self.__steps_per_epoch = steps_per_epoch # Number of steps per epoch
         self.__optimizer = torch.optim.Adam # Optimizer
 
-        # Define the model variables
-        self.__sparse_border_mat = None
-        self.__mat_pairs = None
-        self.__border_times = None
-        self.__is_event = None
-        self.__states = None 
-        self.__delta_t = None
-        self.__max_row_len = None
-        
-        # Compute the model variables
-        self.__sparse_border_mat, self.__mat_pairs, self.__border_pairs, self.__border_times, self.__is_event, self.__states, self.__delta_t, self.__max_row_len = self.__initialize(data=data)
+        self.__min_time = None
+        self.__max_time = None
 
-
-    def __initialize(self, data):
-        '''
-        Compute the model variables
-
-        :param data: A tuple of (pairs, times, states)
-        '''
-
-        pairs, times, states = data
-
-        pairs = torch.as_tensor(pairs, dtype=torch.long, device=self.get_device()).T
-        times = torch.as_tensor(times, dtype=torch.float, device=self.get_device())
-
-        # Add the bin times for each pair and reconstruct the pairs and times tensors
-        border_pairs = torch.hstack((
-            torch.repeat_interleave(torch.triu_indices(
-                self.get_nodes_num(), self.get_nodes_num(), offset=1, dtype=torch.long, device=self.get_device()
-            ), repeats=self.get_bins_num(), dim=1),
-            pairs
-        ))
-
-        border_times = torch.hstack((
-            self.get_bin_bounds()[:-1].unsqueeze(0).expand(self.get_pairs_num(), self.get_bins_num()).flatten(),
-            times
-        ))
-
-        # Construct a tensor indicating if the corresponding time is an event/link or not
-        is_event = torch.hstack((
-            torch.zeros(len(border_times)-len(times),  dtype=torch.bool, device=self.get_device()),
-            torch.ones_like(times, dtype=torch.bool, device=self.get_device())
-        ))
-
-        # Sort all pairs, times and is_event vector
-        sorted_indices = torch.argsort(border_times)
-        border_pairs = border_pairs[:, sorted_indices]
-        border_times = border_times[sorted_indices]
-        is_event = is_event[sorted_indices]
-
-        #### FIX - FIX - FIX ####
-        mat_row_indices = utils.pairIdx2flatIdx(border_pairs[0], border_pairs[1], n=self.get_nodes_num()).type(torch.long)
-        counts = [0]*self.get_pairs_num() #torch.zeros(self.number_of_pairs(), dtype=torch.long, device=self.get_device())
-        mat_col_indices = []
-        for r in mat_row_indices:
-            mat_col_indices.append(counts[r])
-            counts[r] += 1
-        mat_col_indices = torch.as_tensor(mat_col_indices, dtype=torch.long, device=self.get_device())
-        max_row_len = max(counts) + 1
-        mat_pairs = torch.vstack((mat_row_indices, mat_col_indices))
-        #### FIX - FIX - FIX ####
-
-        # Find the corresponding border times of the chosen times
-        sparse_border_mat = torch.sparse_coo_tensor(mat_pairs, values=border_times, size=(self.get_pairs_num(), max_row_len))
-
-        states = torch.sparse.mm(
-            torch.sparse_coo_tensor(mat_pairs, values=is_event.type(torch.int), size=(self.get_pairs_num(), max_row_len)), 
-            torch.triu(torch.ones(size=(max_row_len, max_row_len), dtype=torch.int, device=self.get_device()), diagonal=0)
-        )[mat_row_indices, mat_col_indices]
-        states[states % 2 == 0] = 0
-        states[states > 0] = 1
-
-        delta_t = torch.sparse.mm(
-            torch.sparse_coo_tensor(mat_pairs, values=border_times, size=(self.get_pairs_num(), max_row_len)), 
-            -torch.diag(torch.ones(max_row_len, dtype=torch.float, device=self.get_device()), diagonal=0) + 
-            torch.diag(torch.ones(max_row_len-1, dtype=torch.float, device=self.get_device()), diagonal=-1) 
-        )[mat_row_indices, mat_col_indices]
-        delta_t[delta_t < 0] = self.get_last_time() + delta_t[delta_t < 0]
-
-        return sparse_border_mat, mat_pairs, border_pairs, border_times, is_event, states, delta_t, max_row_len
 
     def __set_gradients(self, beta_grad=None, x0_grad=None, v_grad=None, prior_grad=None):
         '''
@@ -159,13 +82,26 @@ class LearningModel(BaseModel, torch.nn.Module):
                 if '_prior' in name:
                     param.requires_grad = prior_grad
 
-    def learn(self, loss_file_path=None):
+    def learn(self, dataset, loss_file_path=None):
+
+        # Scale the edge times to [0, 1]
+        edge_times = dataset.get_times()
+        self.__min_time = edge_times.min()
+        self.__max_time = edge_times.max()
+        edge_times = (edge_times - self.__min_time) / (self.__max_time - self.__min_time)
+
+        # Define the batch sampler
+        bs = BatchSampler(
+            edges=dataset.get_edges(), edge_times=edge_times, edge_states=dataset.get_states(),
+            bin_bounds=self.get_bin_bounds(), nodes_num=self.get_nodes_num(), batch_size=self.__batch_size, 
+            directed=self.is_directed(), device=self.get_device(), seed=self.get_seed()
+        )
 
         # Check the learning procedure
         if self.__lp == "sequential":
 
             # Run sequential learning
-            loss, nll = self.__sequential_learning()
+            loss, nll = self.__sequential_learning(bs=bs)
 
         else:
 
@@ -181,7 +117,7 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         return loss, nll
 
-    def __sequential_learning(self):
+    def __sequential_learning(self, bs: BatchSampler):
 
         if self.get_verbose():
             print("- Training started (Procedure: Sequential Learning).")
@@ -189,20 +125,25 @@ class LearningModel(BaseModel, torch.nn.Module):
         # Define the optimizers and parameter group names
         self.group_optimizers = []
         self.param_groups = [["v"], ["v", "x0"], ["v", "x0", "prior"]]
-        self.group_epoch_weights = [1.0, 1.0, 1.0]
+        # self.param_groups = [["x0"], ["v",], ["v", "prior"]]
+        # self.param_groups = [["x0", "v", "prior"]]
+        # self.param_groups = [["v"], ["v", "x0"], ]
+        self.group_epoch_weights = [1.0, 1.0, 1.0 ] #[1.0, 1.0, 1.0] #[1.0] #
+
+        self.param_groups = [["v"], ["v", "x0"],]
+        self.group_epoch_weights = [1.0, 1.0]
 
         # For each group of parameters, add a new optimizer
         for current_group in self.param_groups:
             
             # Set the gradients to True
             self.__set_gradients(**{f"{param_name}_grad": True for param_name in current_group})
-
+        
             # Add a new optimizer
             self.group_optimizers.append(self.__optimizer(self.parameters(), lr=self.__lr))
             
             # Set the gradients to False
             self.__set_gradients(**{f"{param_name}_grad": False for param_name in current_group})
-
 
         # Determine the number of epochs for each parameter group
         group_epoch_counts = (self.__epoch_num * torch.cumsum(
@@ -220,7 +161,7 @@ class LearningModel(BaseModel, torch.nn.Module):
 
             # Run the epochs
             for _ in range(current_epoch_count):
-                epoch_loss, epoch_nll = self.__train_one_epoch(epoch_num=epoch_num, optimizer=optimizer)
+                epoch_loss, epoch_nll = self.__train_one_epoch(bs=bs, epoch_num=epoch_num, optimizer=optimizer)
                 loss.append(epoch_loss)
                 nll.append(epoch_nll)
 
@@ -229,7 +170,7 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         return loss, nll
 
-    def __train_one_epoch(self, epoch_num, optimizer):
+    def __train_one_epoch(self, bs: BatchSampler, epoch_num: int, optimizer: torch.optim.Optimizer):
 
         init_time = time.time()
 
@@ -237,7 +178,7 @@ class LearningModel(BaseModel, torch.nn.Module):
         epoch_loss, epoch_nll = [], []
         for batch_num in range(self.__steps_per_epoch):
 
-            batch_nll, batch_nlp = self.__train_one_batch(batch_num)
+            batch_nll, batch_nlp = self.__train_one_batch(bs=bs, batch_num=batch_num)
             batch_loss = batch_nll + batch_nlp
 
             epoch_loss.append(batch_loss)
@@ -267,110 +208,73 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         return epoch_loss, epoch_nll
 
-    def __train_one_batch(self, batch_num):
+    def __train_one_batch(self, bs: BatchSampler, batch_num: int):
 
         self.train()
 
-        batch_nodes = torch.multinomial(
-            torch.ones(self.get_nodes_num(), dtype=torch.float, device=self.get_device()),
-            self.__batch_size, replacement=False
-        )
-        batch_nodes, _ = torch.sort(batch_nodes, dim=0)
+        # Sample a batch
+        batch_nodes, batch_pairs, batch_edges, batch_edge_times, batch_edge_states = bs.sample()
+        # print("nodes:", batch_nodes)
+        # print("pairs:", batch_pairs)
+        # print("edges:", batch_edges)
+        # print("edge_times:", batch_edge_times)
+        # print("edge_states:", batch_edge_states)
 
-        # Construct the pairs of the batch
-        batch_unique_pairs = torch.combinations(batch_nodes, r=2).T.type(torch.int)
 
-        # Construct a sparse diagonal matrix of shape (N(N-1)/2 x N(N-1)/2), storing the sampled batch pairs
-        idx = utils.pairIdx2flatIdx(batch_unique_pairs[0], batch_unique_pairs[1], self.get_nodes_num())
-        sparse_batch_index_mat = torch.sparse_coo_tensor(
-            torch.vstack((idx, idx)), values=torch.ones(size=(batch_unique_pairs.shape[1], ), dtype=torch.float, device=self.get_device()),
-            size=(self.get_pairs_num(), self.get_pairs_num())
-        )
-
-        batch_pairs = utils.linearIdx2matIdx(
-            torch.sparse.mm(sparse_batch_index_mat, self.__sparse_border_mat).coalesce().indices()[0], n=self.get_nodes_num()
-        ).type(torch.long).T
-
-        batch_borders = torch.sparse.mm(
-            sparse_batch_index_mat, torch.sparse_coo_tensor(
-                self.__mat_pairs, values=self.__border_times, dtype=torch.float, device=self.get_device(),
-                size=(self.get_pairs_num(), self.__max_row_len)
-            )
-        ).coalesce().values()
-
-        batch_states = torch.sparse.mm(
-            sparse_batch_index_mat, torch.sparse_coo_tensor(
-                self.__mat_pairs, values=self.__states, dtype=torch.float, device=self.get_device(),
-                size=(self.get_pairs_num(), self.__max_row_len)
-            )
-        ).coalesce().type(torch.long).values()
-
-        batch_is_event = torch.sparse.mm(
-            sparse_batch_index_mat, torch.sparse_coo_tensor(
-                self.__mat_pairs, values=self.__is_event, dtype=torch.float, device=self.get_device(),
-                size=(self.get_pairs_num(), self.__max_row_len)
-            )
-        ).coalesce().type(torch.int).values()
-
-        batch_delta_t = torch.sparse.mm(
-            sparse_batch_index_mat, torch.sparse_coo_tensor(
-                self.__mat_pairs, values=self.__delta_t, dtype=torch.float, device=self.get_device(),
-                size=(self.get_pairs_num(), self.__max_row_len)
-            )
-        ).coalesce().values()
 
         # Compute the R factor inverse if the batch number is 0
         compute_R_factor_inv = True if batch_num == 0 else False
 
         # Finally, compute the negative log-likelihood and the negative log-prior for the batch
-        average_batch_nll, average_batch_nlp = self.forward(
-            nodes=batch_nodes, pairs=batch_pairs, states=batch_states, borders=batch_borders, 
-            is_event=batch_is_event, delta_t=batch_delta_t, compute_R_factor_inv=compute_R_factor_inv
+        batch_nll, batch_nlp = self.forward(
+            nodes=batch_nodes, pairs=batch_pairs, batch_edges=batch_edges, 
+            batch_edge_times=batch_edge_times, batch_states=batch_edge_states, 
+            compute_R_factor_inv=compute_R_factor_inv
         )
+
+        # Divide the batch loss by the number of all possible pairs
+        average_batch_nll = batch_nll / float(batch_pairs.shape[1])
+        average_batch_nlp = batch_nlp / float(batch_pairs.shape[1])
 
         return average_batch_nll, average_batch_nlp
 
-    def forward(self, nodes: torch.Tensor, pairs: torch.Tensor, states: torch.Tensor, borders: torch.Tensor, is_event=torch.Tensor, delta_t=torch.Tensor, compute_R_factor_inv=True):
+    def forward(self, nodes: torch.Tensor, pairs: torch.LongTensor, batch_edges:torch.LongTensor, 
+                batch_edge_times: torch.FloatTensor, batch_states: torch.LongTensor, compute_R_factor_inv=True):
 
         # Get the negative log-likelihood
-        nll = self.get_nll(pairs=pairs, states=states, borders=borders, is_event=is_event, delta_t=delta_t)
-        
-        # Get the negative log-prior and the R-factor inverse
-        nlp = self.get_neg_log_prior(nodes=nodes, compute_R_factor_inv=compute_R_factor_inv)
+        nll = self.get_nll(pairs=pairs, edges=batch_edges, edge_times=batch_edge_times, edge_states=batch_states)
 
-        # print(nll, nlp)
+        # Get the negative log-prior and the R-factor inverse
+        nlp = 0 #self.get_neg_log_prior(nodes=nodes, compute_R_factor_inv=compute_R_factor_inv)
 
         return nll, nlp
-        
+
     def save(self, path):
 
         if self.get_verbose():
             print(f"- Model file is saving.")
             print(f"\t+ Target path: {path}")
 
-        # kwargs = {
-        #     'data': [self.__events_pairs, self.__events ],
-        #     'nodes_num': self.get_nodes_num(), 'bins_num': self.get_bins_num(), 'dim': self.get_dim(),
-        #     'last_time': self.get_last_time(), 'approach': self.__approach,
-        #     # 'prior_k': self.get_prior_k(), 'prior_lambda': self.get_prior_lambda(), 'masked_pairs': self.__masked_pairs,
-        #     'learning_rate': self.__learning_rate, 'batch_size': self.__batch_size, 'epoch_num': self.__epoch_num,
-        #     'steps_per_epoch': self.__steps_per_epoch,
-        #     'device': self.get_device(), 'verbose': self.get_verbose(), 'seed': self.get_seed(),
-        #     # 'learning_procedure': self.__learning_procedure,
-        #     # 'learning_param_names': self.__learning_param_names,
-        #     # 'learning_param_epoch_weights': self.__learning_param_epoch_weights
-        # }
-
         kwargs = {
-            'directed': self.is_directed(), 
-            'init_states': self.get_init_states(),
+            'nodes_num': self.get_nodes_num(),
+            'directed': self.is_directed(),
+            'bins_num': self.get_bins_num(),
+            'dim': self.get_dim(),
             'prior_lambda': self.get_prior_lambda(), 
-            'prior_R_factor_inv_s': self.get_prior_R_factor_inv_s(),
-            'prior_R_factor_inv_r':  self.get_prior_R_factor_inv_r(),
-            'device': self.get_device(), 'verbose': self.get_verbose(), 
+            'k': self.get_prior_k(),
+            'lr': self.__lr,
+            'batch_size':  self.__batch_size,
+            'epoch_num': self.__epoch_num,
+            'steps_per_epoch': self.__steps_per_epoch,
+            'verbose': self.get_verbose(), 
             'seed': self.get_seed()
         }
 
+        # # Scale the parameters
+        # self.state_dict()['_BaseModel__v_s'].mul_( 1. / (self.__max_time - self.__min_time) )
+        # if self.is_directed():
+        #     self.state_dict()['_BaseModel__v_r'].mul_( 1. / (self.__max_time - self.__min_time) )
+        
         torch.save([kwargs, self.state_dict()], path)
 
         if self.get_verbose():

@@ -1,7 +1,5 @@
 import utils
 import torch
-import numpy as np
-import random
 from utils import prior
 
 class BaseModel(torch.nn.Module):
@@ -9,7 +7,7 @@ class BaseModel(torch.nn.Module):
     Description
     '''
     def __init__(self, x0_s: torch.Tensor, v_s: torch.Tensor, beta_s: torch.Tensor, 
-                directed = True, init_states: torch.BoolTensor = None, prior_lambda: float = 1.0, 
+                directed = True, prior_lambda: float = 1.0, 
                 prior_sigma_s: float = 1.0, prior_B_x0_logit_c_s: float = 1.0, 
                 prior_B_ls_s: float = 1.0, prior_C_Q_s: torch.Tensor = None, prior_R_factor_inv_s: torch.Tensor = None, 
                 x0_r: torch.Tensor = None, v_r: torch.Tensor = None, beta_r: torch.Tensor = None, 
@@ -20,8 +18,8 @@ class BaseModel(torch.nn.Module):
         super(BaseModel, self).__init__()
 
         # Define the constants
-        self.__init_time = 0.0
-        self.__last_time = 1.0
+        self.__init_time = 0.
+        self.__last_time = 1.
 
         # Set the model parameters
         self.__x0_s = x0_s
@@ -31,14 +29,12 @@ class BaseModel(torch.nn.Module):
         self.__beta_s = beta_s
         self.__beta_r = beta_r
 
-        # Set the initial states, number of bins and directed variable
-        self.__init_states = init_states
+        # Set the number of bins and directed variable
         self.__bins_num = self.__v_s.shape[0]
         self.__directed = directed
         # Set the number of nodes, dimension size and bin width
         self.__nodes_num = self.__x0_s.shape[0]
         self.__dim = self.__x0_s.shape[1]
-        self.__bin_width = torch.tensor((self.__last_time - self.__init_time) / float(self.__bins_num), device=device)
 
         # Set the model hypermaters
         self.__prior_lambda = prior_lambda
@@ -129,7 +125,7 @@ class BaseModel(torch.nn.Module):
 
     def get_bin_width(self):
 
-        return self.__bin_width
+        return torch.tensor((self.__last_time - self.__init_time) / float(self.__bins_num), device=self.__device)
 
     def get_seed(self):
 
@@ -142,21 +138,6 @@ class BaseModel(torch.nn.Module):
     def get_device(self):
 
         return self.__device
-
-    def get_init_time(self):
-
-        return self.__init_time
-
-    def get_last_time(self):
-
-        return self.__last_time
-
-    def get_init_states(self, pair_idx = None):
-
-        if pair_idx is None:
-            return self.__init_states
-        else:
-            return self.__init_states[pair_idx]
 
     def get_prior_lambda(self):
         '''
@@ -233,7 +214,6 @@ class BaseModel(torch.nn.Module):
         '''
         return self.__prior_R_factor_inv_r
 
-
     def set_prior_R_factor_inv_s(self, prior_R_factor_inv_s):
         '''
         Sets the inverse factor of the sender capacitance matrix
@@ -252,7 +232,7 @@ class BaseModel(torch.nn.Module):
         :return: a vector of shape B+1
         '''
         bounds = self.__init_time + torch.cat((
-            torch.as_tensor([self.get_init_time()], device=self.get_device()),
+            torch.as_tensor([self.__init_time], device=self.get_device()),
             torch.arange(start=1, end=self.get_bins_num()+1, device=self.get_device()) * self.get_bin_width()
         ))
 
@@ -337,7 +317,7 @@ class BaseModel(torch.nn.Module):
         rt = rt + residual_time.view(-1, 1)*self.get_v_r(standardize=standardize)[bin_indices, nodes, :]
         return rt
 
-    def get_beta_ij(self, pairs: torch.Tensor, states: torch.Tensor) -> torch.Tensor:
+    def get_beta_ij(self, pairs: torch.Tensor, pair_states: torch.Tensor) -> torch.Tensor:
         '''
         Computes the sum of the beta elements for given pair and states
 
@@ -350,7 +330,7 @@ class BaseModel(torch.nn.Module):
         beta_s = self.get_beta_s()
         beta_r = self.get_beta_r() if self.is_directed() else beta_s
 
-        return beta_s[pairs[0], states] + beta_r[pairs[1], states]
+        return beta_s[pairs[0], pair_states] + beta_r[pairs[1], pair_states]
 
     def get_delta_v(self, bin_indices: torch.Tensor, pairs: torch.Tensor, standardize: bool = True) -> torch.Tensor:
         '''
@@ -376,7 +356,6 @@ class BaseModel(torch.nn.Module):
         :param standardize: a boolean parameter to set the standardization of the initial position and velocity vectors
         :return: A matrix of shape L X D
         '''
-
         # Compute the bin indices and residul times of the given time points
         bin_indices = self.get_bin_index(time_list=time_list)
         residual_time = self.get_residual(time_list=time_list, bin_indices=bin_indices)
@@ -402,7 +381,7 @@ class BaseModel(torch.nn.Module):
 
         return delta_rt
 
-    def get_log_intensity_at(self, time_list: torch.Tensor, pairs: torch.Tensor, states: torch.Tensor) -> torch.Tensor:
+    def get_log_intensity_at(self, time_list: torch.Tensor, edges: torch.Tensor, edge_states: torch.Tensor) -> torch.Tensor:
         '''
         Computes the log of the intenstiy function for given times and pairs
 
@@ -411,12 +390,12 @@ class BaseModel(torch.nn.Module):
         :param states: a vector of shape L
         :return: A vector of shape L
         '''
-        beta_ij = self.get_beta_ij(pairs=pairs, states=states)
-        intensity = beta_ij + (2*states-1)*torch.norm(self.get_delta_rt(time_list=time_list, pairs=pairs), p=2, dim=1, keepdim=False)**2 
+        beta_ij = self.get_beta_ij(pairs=edges, pair_states=edge_states)
+        intensity = beta_ij + (2*edge_states-1)*torch.norm(self.get_delta_rt(time_list=time_list, pairs=edges), p=2, dim=1, keepdim=False)**2 
 
         return intensity
 
-    def get_intensity_at(self, time_list: torch.Tensor, pairs: torch.Tensor, states: torch.Tensor) -> torch.Tensor:
+    def get_intensity_at(self, time_list: torch.Tensor, edges: torch.Tensor, edge_states: torch.Tensor) -> torch.Tensor:
         '''
         Computes the intenstiy function for given times and pairs
 
@@ -424,7 +403,7 @@ class BaseModel(torch.nn.Module):
         :param pairs: a vector of shape 2 x L
         :return: A vector of shape L
         '''
-        return torch.exp(self.get_log_intensity_at(time_list=time_list, pairs=pairs, states=states))
+        return torch.exp(self.get_log_intensity_at(time_list=time_list, edges=edges, edge_states=edge_states))
 
     def get_intensity_integral(self, time_list: torch.Tensor, pairs: torch.Tensor, delta_t: torch.Tensor, states: torch.Tensor, standardize: bool = True) -> torch.Tensor:
         '''
@@ -444,7 +423,7 @@ class BaseModel(torch.nn.Module):
         delta_v = self.get_delta_v(bin_indices=bin_indices, pairs=pairs, standardize=standardize)
 
         # Compute the beta sums
-        beta_ij = self.get_beta_ij(pairs=pairs, states=states)
+        beta_ij = self.get_beta_ij(pairs=pairs, pair_states=states)
 
         norm_delta_r = torch.norm(delta_r, p=2, dim=1, keepdim=False)
         norm_delta_v = torch.norm(delta_v, p=2, dim=1, keepdim=False) + utils.EPS
@@ -459,12 +438,9 @@ class BaseModel(torch.nn.Module):
         term2_u = (1-states)*torch.erf(delta_t * norm_delta_v + r) + states*utils.erfi_approx(delta_t * norm_delta_v + r)
         term2_l = (1-states)*torch.erf(r) + states*utils.erfi_approx(r)
 
-        # print("---", ((2*states-1)*(r**2)).sum().data, term1.sum().data, term2_u.sum().data, term2_l.sum().data)
-        # print("Prior", term2_u.sum().data, term2_l.sum().data)
+        return term0 * term1 * (term2_u - term2_l)
 
-        return (term0 * term1 * (term2_u - term2_l))
-
-    def get_nll(self, pairs: torch.Tensor, states:torch.Tensor, borders:torch.Tensor, is_event:torch.Tensor, delta_t: torch.Tensor) -> torch.Tensor:
+    def get_nll(self, pairs: torch.Tensor, edges: torch.LongTensor, edge_times: torch.FloatTensor, edge_states: torch.LongTensor) -> torch.Tensor:
         '''
         Computes the negative log-likelihood function of the model
 
@@ -475,16 +451,72 @@ class BaseModel(torch.nn.Module):
         :param delta_t: a vector of shape L
         :return:
         '''
-        
+
         non_integral_term = self.get_log_intensity_at(
-            time_list=borders[is_event==True], pairs=pairs[:, is_event==True], states=states[is_event==True]
+            time_list=edge_times, edges=edges, edge_states=edge_states
         ).sum()
+
+        #########
+        border_idx = torch.concat((
+            utils.pairIdx2flatIdx(pairs[0], pairs[1], self.get_nodes_num(), directed=self.is_directed()).repeat_interleave(repeats=self.get_bins_num(), dim=0),
+            utils.pairIdx2flatIdx(edges[0], edges[1], self.get_nodes_num(), directed=self.is_directed())
+        ))
+        border_times = torch.concat((
+            self.get_bin_bounds()[:-1].repeat(pairs.shape[1]), edge_times
+        ))
+        border_states = torch.concat((
+            torch.zeros(self.get_bins_num() * pairs.shape[1], dtype=torch.float, device=self.get_device()), edge_states.to(torch.float)
+        ))
+        border_marked_idx = torch.concat((
+            torch.eye(1, self.get_bins_num(), dtype=torch.float, device=self.get_device()).squeeze(0).repeat(pairs.shape[1]),
+            torch.ones(len(edge_states), dtype=torch.float, device=self.get_device())
+        ))
+        border = torch.vstack((border_idx, border_times, border_states, border_marked_idx))
+
+        # Firstly, sort with respect to the pair indices, then time and finally states.
+        #---------------border = border[:, border[2].argsort(descending=False, stable=True)] #
+        border = border[:, border[2].argsort(descending=False, stable=True)]
+        border = border[:, border[1].argsort(stable=True)]
+        border = border[:, border[0].argsort(stable=True)]
+
+        cumsum1 = border[3].cumsum(0) - 1 #cumsum1 = border[3].cumsum(0)
+        counts = torch.bincount(cumsum1.to(torch.long))
+        # print("counts:", len(counts) )
+        # print("x:", len( border[2][border[3].to(torch.bool)] ))
+        augmented_states = torch.repeat_interleave(border[2][border[3].to(torch.bool) == 1], counts ) #augmented_states = torch.repeat_interleave(border[2][border[3].to(torch.bool)], counts[1:] )
+
+        # delta_t = border[1][1:] - border[1][:-1]
+        # mask = (delta_t == -1)
+        # delta_t[mask] = .0
+        # delta_t = torch.concat(( delta_t, torch.ones(1, dtype=torch.float, device=self.get_device())-delta_t[-1] ))
+        # delta_t[-1] = 0
+        #########
+        # delta_t = border[1][1:] - border[1][:-1]
+        # mask = delta_t < 0
+        # delta_t[mask] = 1.0 + delta_t[mask]
+        # delta_t = torch.concat((delta_t, torch.ones(1, dtype=torch.float, device=self.get_device()) - delta_t[-1]))
+        #########
+        delta_t = border[1][1:] - border[1][:-1]
+        mask = delta_t < 0
+        # print("mask:", delta_t[mask])
+        # raise ValueError("STOP")
+        delta_t[mask] = 1.0 + delta_t[mask]
+        delta_t = torch.concat((delta_t, (1. - border[1][-1]).unsqueeze(0) ))
+
+        # # idx, times, states, marked idx, delta_t, augmented_states
+        # for idx, x, y, z, w, k in zip(border[0], border[1], border[2], border[3], delta_t, augmented_states):
+        #     print(f"{idx}\t{x}\t{y}\t{z}\t{w}\t{k}")
+        #     # print("border_times:", border[1])
+        #     # print("augmented_states:", augmented_states)
+        # raise ValueError("STOP")
 
         integral_term = -self.get_intensity_integral(
-            time_list=borders, pairs=pairs.type(torch.long), delta_t=delta_t, states=states.type(torch.long)
+            time_list=border[1], pairs=utils.linearIdx2matIdx(border[0], n=self.get_nodes_num(), directed=self.is_directed()).to(torch.long),
+            delta_t=delta_t, states=augmented_states.to(torch.long)
         ).sum()
 
-        # print("NLL: ", non_integral_term.data, integral_term.data)
+        # print("non_integral_term:", non_integral_term)
+        # print("integral_term:", integral_term)
 
         return -(non_integral_term + integral_term)
 
@@ -542,11 +574,10 @@ class BaseModel(torch.nn.Module):
             if self.is_directed():
                 R_factor_inv_r = self.get_prior_R_factor_inv_r()
 
-        if self.is_directed():
+        if not self.is_directed():
             Kf_r, R_factor_inv_r = None, None
         
         return Kf_s, R_factor_inv_s, Kf_r, R_factor_inv_r
-
 
     def get_neg_log_prior(self, nodes: torch.Tensor, compute_R_factor_inv: bool = True) -> torch.float:
 
@@ -587,17 +618,17 @@ class BaseModel(torch.nn.Module):
         # Computation of the log determinant
         # It uses Matrix Determinant Lemma: log|D + Kf @ Kf.T| = log|R| + log|D|,
         # where R is the capacitance matrix defined by I + Kf.T @ inv(D) @ Kf
-        log_det_s = -2 * R_factor_inv_s.diag().log().sum() + final_dim*(lambda_sq.log() - sigma_sq_inv_s.log())
+        log_det_s = 0 #-2 * R_factor_inv_s.diag().log().sum() + final_dim*(lambda_sq.log() - sigma_sq_inv_s.log())
         if self.is_directed():
-            log_det_r = -2 * R_factor_inv_r.diag().log().sum() + final_dim*(lambda_sq.log() - sigma_sq_inv_r.log())
+            log_det_r = 0 #-2 * R_factor_inv_r.diag().log().sum() + final_dim*(lambda_sq.log() - sigma_sq_inv_r.log())
 
         # Compute the negative log-likelihood
         log_prior_s = -0.5 * (final_dim * utils.LOG2PI + log_det_s + m_s)
         if self.is_directed():
             log_prior_r = -0.5 * (final_dim * utils.LOG2PI + log_det_r + m_r)
 
-        neg_log_prior = -log_prior_s
+        neg_log_prior = log_prior_s
         if self.is_directed():
-            neg_log_prior += -log_prior_r
+            neg_log_prior += log_prior_r
 
         return -neg_log_prior.squeeze()

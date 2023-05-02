@@ -25,81 +25,31 @@ lr = 0.01 #0.01
 seed = 19 #19
 verbose = True
 k=10
-prior_lambda=1e4
+prior_lambda=1e6
 directed = False
 
 
 # Define the dataset name
-dataset_name = "synthetic_april10_" + ('directed' if directed else 'undirected')
+dataset_name = "synthetic_2clusters_" + ('directed' if directed else 'undirected')
 # Get the current folder path
 current_folder = os.path.dirname(os.path.abspath(__file__))
 # Define the dataset folder path
 dataset_folder=os.path.join(current_folder, '..', 'datasets', dataset_name)
 # Define the data path
 data_path = os.path.join(dataset_folder, f"{dataset_name}.edges")
-
-# edges = torch.as_tensor([[0, 2, 1, 0, 1], [1, 3, 3, 1, 3]]).to(torch.long)
-# edge_times = torch.as_tensor([0.1, 0.2, 0.4, 0.7, 0.8]).to(torch.float)
-# edge_states = torch.as_tensor([1, 1, 1, 0, 0]).to(torch.long)
-# idx = torch.as_tensor([1, 0, 2, 3, 4]).to(torch.long)
-# edges = edges[:, idx]
-# edge_times = edge_times[idx]
-# edge_states = edge_states[idx]
-
-# dataset = Dataset(nodes_num=4, edges=edges, edge_times=edge_times, edge_states=edge_states, init_time=0, last_time=1.)
-dataset = Dataset()
-dataset.read_edgelist(data_path)
-nodes_num = dataset.get_nodes_num()
-
-print("Nodes num", nodes_num)
-
-# dataset.split(train_ratio=0.8, val_ratio=0.1, test_ratio=0.1, seed=seed)
-
-
-
-
-# pairs = data[0]
-# events = data[1]
-# states = data[2]
-# directed = data[3]
-# init_time = 0 if len(data) <= 4 else data[4]
-# last_time = 1.0 if len(data) <= 5 else data[5]
-
-# # Extract the number of nodes
-# nodes_num = max(map(max, pairs)) + 1
-# print("Nodes num", nodes_num)
-# batch_size = nodes_num if batch_size == 0 else batch_size
-
 # Define the model name
 model_name = f"{dataset_name}_B={bins_num}_D={dim}_lr={lr}_ep={epoch_num}_lambda={prior_lambda}"
-
-# # # Get the current folder path
-# # current_folder = os.path.dirname(os.path.abspath(__file__))
 # Define the model path for saving
 model_folder = os.path.join(current_folder, '..', 'models')
 # Define the model path
 model_path = os.path.join(model_folder, model_name + ".model")
 
+dataset = Dataset()
+dataset.read_edgelist(data_path)
+nodes_num = dataset.get_nodes_num()
 
-# # If the model folder does not exist, create it
-# if not os.path.exists(model_folder):
-#     os.makedirs(model_folder)
-
-# # # Get the number of nodes
-# # nodes_num = 4
-
-# # # # data = [[0,1], [0,2], [0,3], [1,2], [1,3], [2,3]], [[], [0.1, 0.3], [], [], [0.7, 0.9], []]
-# # #####
-# # # pairs = [ (0, 2), (0, 2), (1, 3), (1, 3) ]
-# # # events = [ 0.1,  0.6,  0.7, 0.9 ]
-# # # states = [ 0, 0, 0, 0 ]
-# # pairs = [ (0, 2), (0, 2), (1, 3), (1, 3), (2 ,3), (2, 3), (0, 3), (0, 3), (0, 1), (0, 1) ]
-# # events = [ 0.1,  0.7,  0.2, 0.6, 0.3, 0.5, 0.3, 0.5, 0.3, 0.5 ]
-# # init_states = [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
-
-# init_states = states
-# data = pairs, events, init_states
-# # directed = False #True #False
+print("Nodes num", nodes_num)
+print(f"Min time: {max(dataset.get_edge_times())}")
 
 
 # Define the learning model

@@ -1,4 +1,8 @@
+.vscode
 .DS_Store
 .idea
 *.mp4
 *.html
+*.gif
+**/*.model
+**/__pycache__

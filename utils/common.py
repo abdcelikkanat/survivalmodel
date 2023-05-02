@@ -4,8 +4,8 @@ import math
 import random
 import torch
 import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.utils import shuffle
+# import matplotlib.pyplot as plt
+# from sklearn.utils import shuffle
 
 # Path definitions
 BASE_FOLDER = os.path.realpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
@@ -77,7 +77,7 @@ def pairIdx2flatIdx(i, j, n, directed=False):
         return i*n + j - i - 1*(j>i)
 
 # A method converting linear index to pair index
-def linearIdx2matIdx(idx, n, dtype=torch.int, directed=False):
+def linearIdx2matIdx(idx, n, dtype=torch.long, directed=False):
 
     if directed:
 
@@ -85,48 +85,48 @@ def linearIdx2matIdx(idx, n, dtype=torch.int, directed=False):
         col_idx = idx % (n-1)
         col_idx[col_idx >= row_idx] += 1
 
-        return torch.vstack((row_idx, col_idx)).T
+        return torch.vstack((row_idx, col_idx))
 
     else:
 
         r = torch.ceil(n - 1 - 0.5 - torch.sqrt(n ** 2 - n - 2 * idx - 1.75)).type(dtype)
         c = idx - r * n + ((r + 1) * (r + 2)) // 2
 
-        return torch.vstack((r.type(dtype), c.type(dtype))).T
+        return torch.vstack((r.type(dtype), c.type(dtype)))
 
 
-def plot_events(num_of_nodes, samples, labels, title=""):
+# def plot_events(num_of_nodes, samples, labels, title=""):
 
-    def node_pairs(num_of_nodes):
-        for idx1 in range(num_of_nodes):
-            for idx2 in range(idx1 + 1, num_of_nodes):
-                yield idx1, idx2
-    pair2idx = {pair: idx for idx, pair in enumerate(node_pairs(num_of_nodes))}
+#     def node_pairs(num_of_nodes):
+#         for idx1 in range(num_of_nodes):
+#             for idx2 in range(idx1 + 1, num_of_nodes):
+#                 yield idx1, idx2
+#     pair2idx = {pair: idx for idx, pair in enumerate(node_pairs(num_of_nodes))}
 
-    samples, labels = shuffle(samples, labels)
+#     samples, labels = shuffle(samples, labels)
 
-    plt.figure(figsize=(18, 10))
-    x = {i: {j: [] for j in range(i+1, num_of_nodes)} for i in range(num_of_nodes)}
-    y = {i: {j: [] for j in range(i+1, num_of_nodes)} for i in range(num_of_nodes)}
-    c = {i: {j: [] for j in range(i+1, num_of_nodes)} for i in range(num_of_nodes)}
+#     plt.figure(figsize=(18, 10))
+#     x = {i: {j: [] for j in range(i+1, num_of_nodes)} for i in range(num_of_nodes)}
+#     y = {i: {j: [] for j in range(i+1, num_of_nodes)} for i in range(num_of_nodes)}
+#     c = {i: {j: [] for j in range(i+1, num_of_nodes)} for i in range(num_of_nodes)}
 
-    for sample, label in zip(samples, labels):
+#     for sample, label in zip(samples, labels):
 
-        idx1, idx2, e = int(sample[0]), int(sample[1]), float(sample[2])
+#         idx1, idx2, e = int(sample[0]), int(sample[1]), float(sample[2])
 
-        x[idx1][idx2].append(e)
-        y[idx1][idx2].append(pair2idx[(idx1, idx2)])
-        c[idx1][idx2].append(label)
+#         x[idx1][idx2].append(e)
+#         y[idx1][idx2].append(pair2idx[(idx1, idx2)])
+#         c[idx1][idx2].append(label)
 
-    colors = ['.r', 'xk']
-    for idx1, idx2 in node_pairs(num_of_nodes):
+#     colors = ['.r', 'xk']
+#     for idx1, idx2 in node_pairs(num_of_nodes):
 
-        for idx3 in range(len(x[idx1][idx2])):
-            # if colors[c[idx1][idx2][idx3]] != '.r':
-            plt.plot(x[idx1][idx2][idx3], y[idx1][idx2][idx3], colors[c[idx1][idx2][idx3]])
+#         for idx3 in range(len(x[idx1][idx2])):
+#             # if colors[c[idx1][idx2][idx3]] != '.r':
+#             plt.plot(x[idx1][idx2][idx3], y[idx1][idx2][idx3], colors[c[idx1][idx2][idx3]])
 
-    plt.grid(axis='x')
-    plt.title(title)
-    plt.show()
+#     plt.grid(axis='x')
+#     plt.title(title)
+#     plt.show()
 
     

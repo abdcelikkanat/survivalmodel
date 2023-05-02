@@ -38,7 +38,6 @@ def get_B(bin_centers1: torch.Tensor, bin_centers2: torch.Tensor, prior_B_x0_c: 
 
     return kernel
 
-
 def get_B_factor(bin_centers1: torch.Tensor, bin_centers2: torch.Tensor, prior_B_x0_c: torch.Tensor, prior_B_ls: torch.Tensor):
     '''
     Computes the bin matrix factor, B, of shape (B+1) x (B+1)

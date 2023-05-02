@@ -3,10 +3,11 @@ import matplotlib.animation as animation
 import numpy as np
 import seaborn as sns
 from utils import pairIdx2flatIdx
+from src.dataset import Dataset
 
 class Animation:
 
-    def __init__(self, embs, frame_times: np.asarray = None, data: tuple = (None, None), directed=False,
+    def __init__(self, embs, frame_times: np.asarray = None, dataset: Dataset = None, directed=False,
                  figsize=(12, 10), node_sizes=100, node2color: list = None,
                  color_palette="rocket_r", padding=0.1, fps=6,):
 
@@ -18,15 +19,18 @@ class Animation:
         self._embs_s = embs[0]
         self._embs_r = embs[1] if directed else None
         self._frame_times = frame_times
-        pair2id, self._event_pairs, self._event_times = dict(), [], []
-        for pair, e in zip(data[0], data[1]):
+        pair2id, self._event_pairs, self._event_times, self._event_states = dict(), [], [], []
+        for pair, e, s in zip(dataset.get_edges().T.tolist(), dataset.get_times(), dataset.get_states()): #zip(data[0], data[1]):
             pair_idx = pairIdx2flatIdx(pair[0], pair[1], self._embs_s.shape[1], directed=directed)
             if pair_idx not in pair2id:
                 pair2id[pair_idx] = len(pair2id)
                 self._event_pairs.append(pair)
                 self._event_times.append([e])
+                self._event_states.append([s])
             else:
                 self._event_times[pair2id[pair_idx]].append(e)
+                self._event_states[pair2id[pair_idx]].append(s)
+
         self._directed = directed
         self._frames_num = self._embs_s.shape[0]
         self._nodes_num = self._embs_s.shape[1]
@@ -87,6 +91,8 @@ class Animation:
             for line in list(ax.lines):
                 ax.lines.remove(line)
 
+            ax.set_title("Time (t={:0.2f})".format(self._frame_times[f]), fontsize=16)
+
             # Plot the nodes
             sc.set_offsets(np.c_[self._embs_s[f, :, 0], self._embs_s[f, :, 1]])
             
@@ -96,42 +102,45 @@ class Animation:
             # Plot the event links
             if self._event_times is not None and self._event_pairs is not None:
 
-                for pair_events, pair in zip(self._event_times, self._event_pairs):
+                for pair_events, pair_states, pair in zip(self._event_times, self._event_states, self._event_pairs):
 
                     # Get the i, j indices of the pair
                     i, j = pair
 
-                    # Get the number of events that are smaller or equal the frame time
-                    w = sum(self._frame_times[f] - pair_events >= 0)  
+                    # Find the index of the list of event times that is the closest to the frame time
+                    idx = np.argmin(abs(self._frame_times[f] - pair_events))
 
-                    # By assumption, initally links are not present so 'w' must be an odd number to plot a link
-                    if w % 2 == 1:
-
-                        # Find the index of the list of event times that is the closest to the frame time
-                        idx = np.argmin(self._frame_times[f] - pair_events)
-
-                        # Since the number of events that are smaller or equal to the frame time is odd, self._frame_times[f] >= pair_events[idx]
-                        # Set the alpha value to 1 if there is only one event (idx must be 0 in this case) or the index is the last event
-                        if idx == len(pair_events)-1:
-                            alpha = 1
+                    current_state = None
+                    if self._frame_times[f] < pair_events[idx]:
+                        if idx == 0:
+                            current_state = not pair_states[idx]
                         else:
-                            assert self._frame_times[f] >= pair_events[idx], f"OHA! {self._frame_times[f]}, {pair_events[idx]}"
-                            alpha = 1 - (self._frame_times[f]-pair_events[idx])/(pair_events[idx+1]-pair_events[idx])
+                            current_state = pair_states[idx - 1]
+                    else:
+                        current_state = pair_states[idx]
 
-                        if self._directed:
-                            ax.plot(
-                                [self._embs_s[f, i, 0], self._embs_r[f, j, 0]],
-                                [self._embs_s[f, i, 1], self._embs_r[f, j, 1]],
-                                color='k',
-                                alpha=alpha
-                            )
-                        else:
-                            ax.plot(
-                                [self._embs_s[f, i, 0], self._embs_s[f, j, 0]],
-                                [self._embs_s[f, i, 1], self._embs_s[f, j, 1]],
-                                color='k',
-                                alpha=alpha
-                            )
+                    # Since the number of events that are smaller or equal to the frame time is odd, self._frame_times[f] >= pair_events[idx]
+                    # Set the alpha value to 1 if there is only one event (idx must be 0 in this case) or the index is the last event
+                    if current_state:
+                        alpha = 1
+                    else:
+                        # assert self._frame_times[f] >= pair_events[idx], f"Ohh No! {self._frame_times[f]}, {pair_events[idx]}"
+                        alpha = 0 #1 - (self._frame_times[f]-pair_events[idx])/(pair_events[idx+1]-pair_events[idx])
+
+                    if self._directed:
+                        ax.plot(
+                            [self._embs_s[f, i, 0], self._embs_r[f, j, 0]],
+                            [self._embs_s[f, i, 1], self._embs_r[f, j, 1]],
+                            color='k',
+                            alpha=alpha
+                        )
+                    else:
+                        ax.plot(
+                            [self._embs_s[f, i, 0], self._embs_s[f, j, 0]],
+                            [self._embs_s[f, i, 1], self._embs_s[f, j, 1]],
+                            color='k',
+                            alpha=alpha
+                        )
 
         anim = animation.FuncAnimation(
             fig=fig, init_func=__init_func, func=__func, frames=self._frames_num, interval=200, repeat=repeat
@@ -144,12 +153,11 @@ class Animation:
 
         fig, ax = plt.subplots(figsize=self._figsize, frameon=True)
         # ax.set_axis_off()
-        # Add a legend
+        # fig.subplots_adjust(left=0, bottom=0, right=1, top=0.95)
 
         self._anim = self._render(fig)
         
 
-        # fig.set_size_inches(y_max-y_min, x_max-x_min, )
         if format == "mp4":
             writer = animation.FFMpegWriter(fps=self._fps)
 

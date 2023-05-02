@@ -3,10 +3,10 @@ import utils
 
 class BatchSampler(torch.nn.Module):
     
-    def __init__(self, edges:torch.LongTensor, edge_times: torch.FloatTensor, edge_states: torch.LongTensor, 
-                nodes_num: int, batch_size: int, directed: bool, device:torch.device = "cpu", seed: int = 19):
+    def __init__(self, edges: torch.LongTensor, edge_times: torch.FloatTensor, edge_states: torch.LongTensor, 
+                bin_bounds: torch.FloatTensor, nodes_num: int, batch_size: int, directed: bool, device: torch.device = "cpu", seed: int = 19):
 
-        super(BatchSampler).__init__()
+        super(BatchSampler, self).__init__()
 
         # Set the parameters
         self.__edges = edges
@@ -43,21 +43,18 @@ class BatchSampler(torch.nn.Module):
             values=self.__edge_states.to(torch.float),
             size=(self.__pairs_num, max_edge_count_per_pair), device=self.__device
         )
-
-
         utils.set_seed(seed)
 
     def sample(self):
 
         # Sample the batch nodes
-        # batch_nodes = torch.randint(0, self.__nodes_num, (self.__batch_size, ), dtype=torch.long, device=self.__device, replacement=False)
         batch_nodes = torch.multinomial(torch.arange(self.__nodes_num, dtype=torch.float, device=self.__device), self.__batch_size, replacement=False).to(torch.long)
-
+        # Sort the nodes in order to obtain pairs (i,j) such that i < j otherwise there might exist j > i pairs violating undirected case
+        batch_nodes = batch_nodes.sort()[0]
         # Construct a matrix of shape 2x(Batch Size) storing the all possible batch node pairs
         batch_pairs = torch.combinations(batch_nodes, with_replacement=False).T
         if self.__directed:
             batch_pairs = torch.hstack((batch_pairs, torch.flip(batch_pairs, dims=(0, ))))
-
         # Convert the batch pairs in flat indices
         batch_flat_idx = utils.pairIdx2flatIdx(batch_pairs[0], batch_pairs[1], n=self.__nodes_num, directed=self.__directed)
 
@@ -75,16 +72,7 @@ class BatchSampler(torch.nn.Module):
         batch_edge_times = output.values()
         # Construct the batch edge states
         output = torch.sparse.mm(selection_mat, self.__edge_states_mat)
-        batch_states = output.values() 
+        batch_states = output.values()
 
-        return batch_edges, batch_edge_times, batch_states
+        return batch_nodes, batch_pairs, batch_edges, batch_edge_times, batch_states.to(torch.long)
 
-# nodes_num = 4
-# edges = torch.as_tensor([[0, 1, 2, 0], [1, 2, 3, 1]], dtype=torch.long)
-# edge_times = torch.as_tensor([0.1, 0.2, 0.3, 0.4], dtype=torch.float)
-# edge_states = torch.as_tensor([0, 1, 2, 3], dtype=torch.long)
-
-# bs = BatchSampler(edges=edges, edge_times=edge_times, edge_states=edge_states, nodes_num=nodes_num, batch_size=4, directed=True, seed=19)
-# edges, edge_times, edge_states = bs.sample()
-
-# print(edge_states)
