@@ -440,85 +440,92 @@ class BaseModel(torch.nn.Module):
 
         return term0 * term1 * (term2_u - term2_l)
 
-    def get_nll(self, pairs: torch.Tensor, edges: torch.LongTensor, edge_times: torch.FloatTensor, edge_states: torch.LongTensor) -> torch.Tensor:
-        '''
+    def get_augmented_data(self, pairs: torch.Tensor, edges: torch.LongTensor,
+                           edge_times: torch.FloatTensor, edge_states: torch.LongTensor) -> tuple:
+        """
+        CAugmented data consist of given edge times/states and the border times/states
+
+        :param pairs: a matrix of shape 2 x L
+        :param edges: a matrix of shape 2 x L
+        :param edge_times: a vector of shape L
+        :param edge_states: a vector of shape L
+        :return augmented idx, times, states and delta_t:
+        """
+
+        #########
+        # Store the corresponding border and edge indices of the pairs
+        border_idx = torch.concat((
+            utils.pairIdx2flatIdx(
+                pairs[0], pairs[1], self.get_nodes_num(), directed=self.is_directed()
+            ).repeat_interleave(repeats=self.get_bins_num(), dim=0),
+            utils.pairIdx2flatIdx(
+                edges[0], edges[1], self.get_nodes_num(), directed=self.is_directed()
+            )
+        ))
+        # Store the corresponding border and edge times
+        border_times = torch.concat((
+            self.get_bin_bounds()[:-1].repeat(pairs.shape[1]),
+            edge_times
+        ))
+        # Store the corresponding border and edge states
+        border_states = torch.concat((
+            torch.zeros(self.get_bins_num() * pairs.shape[1], dtype=torch.float, device=self.get_device()),
+            edge_states.to(torch.float)
+        ))
+
+        # Mark the first time of bin borders to detect later the  and all the edges
+        border_marked_idx = torch.concat((
+            torch.eye(1, self.get_bins_num(), dtype=torch.float, device=self.get_device()).squeeze(0).repeat(pairs.shape[1]),
+            torch.ones(len(edge_states), dtype=torch.float, device=self.get_device())
+        ))
+        # Concatenate all the tensors
+        border = torch.vstack((border_idx, border_times, border_states, border_marked_idx))
+
+        # Firstly, sort with respect to the pair indices, then time and finally states.
+        border = border[:, border[2].argsort(stable=True)]
+        border = border[:, border[1].argsort(stable=True)]
+        border = border[:, border[0].argsort(stable=True)]
+
+        cumsum1 = border[3].cumsum(0) - 1
+        counts = torch.bincount(cumsum1.to(torch.long))
+        augmented_states = torch.repeat_interleave(border[2][border[3].to(torch.bool) == 1], counts )
+
+        delta_t = border[1][1:] - border[1][:-1]
+        mask = delta_t < 0
+        delta_t[mask] = 1.0 + delta_t[mask]
+        delta_t = torch.concat((delta_t, (1. - border[1][-1]).unsqueeze(0) ))
+
+        # Convert idx to pairs
+        augmented_pairs = utils.linearIdx2matIdx(border[0], self.get_nodes_num(), self.is_directed()).to(torch.long)
+        return augmented_pairs, border[1], augmented_states, delta_t
+
+    def get_nll(self, pairs: torch.Tensor, edges: torch.LongTensor, edge_times: torch.FloatTensor,
+                edge_states: torch.LongTensor) -> torch.Tensor:
+        """
         Computes the negative log-likelihood function of the model
 
         :param pairs: a matrix of shape 2 x L
-        :param states: a vector of shape L
-        :param borders: a vector of shape L
-        :param is_event: a vector of shape L
-        :param delta_t: a vector of shape L
+        :param edges: a vector of shape L
+        :param edge_times: a vector of shape L
+        :param edge_states: a vector of shape L
         :return:
-        '''
+        """
 
         non_integral_term = self.get_log_intensity_at(
             time_list=edge_times, edges=edges, edge_states=edge_states
         ).sum()
 
-        #########
-        border_idx = torch.concat((
-            utils.pairIdx2flatIdx(pairs[0], pairs[1], self.get_nodes_num(), directed=self.is_directed()).repeat_interleave(repeats=self.get_bins_num(), dim=0),
-            utils.pairIdx2flatIdx(edges[0], edges[1], self.get_nodes_num(), directed=self.is_directed())
-        ))
-        border_times = torch.concat((
-            self.get_bin_bounds()[:-1].repeat(pairs.shape[1]), edge_times
-        ))
-        border_states = torch.concat((
-            torch.zeros(self.get_bins_num() * pairs.shape[1], dtype=torch.float, device=self.get_device()), edge_states.to(torch.float)
-        ))
-        border_marked_idx = torch.concat((
-            torch.eye(1, self.get_bins_num(), dtype=torch.float, device=self.get_device()).squeeze(0).repeat(pairs.shape[1]),
-            torch.ones(len(edge_states), dtype=torch.float, device=self.get_device())
-        ))
-        border = torch.vstack((border_idx, border_times, border_states, border_marked_idx))
-
-        # Firstly, sort with respect to the pair indices, then time and finally states.
-        #---------------border = border[:, border[2].argsort(descending=False, stable=True)] #
-        border = border[:, border[2].argsort(descending=False, stable=True)]
-        border = border[:, border[1].argsort(stable=True)]
-        border = border[:, border[0].argsort(stable=True)]
-
-        cumsum1 = border[3].cumsum(0) - 1 #cumsum1 = border[3].cumsum(0)
-        counts = torch.bincount(cumsum1.to(torch.long))
-        # print("counts:", len(counts) )
-        # print("x:", len( border[2][border[3].to(torch.bool)] ))
-        augmented_states = torch.repeat_interleave(border[2][border[3].to(torch.bool) == 1], counts ) #augmented_states = torch.repeat_interleave(border[2][border[3].to(torch.bool)], counts[1:] )
-
-        # delta_t = border[1][1:] - border[1][:-1]
-        # mask = (delta_t == -1)
-        # delta_t[mask] = .0
-        # delta_t = torch.concat(( delta_t, torch.ones(1, dtype=torch.float, device=self.get_device())-delta_t[-1] ))
-        # delta_t[-1] = 0
-        #########
-        # delta_t = border[1][1:] - border[1][:-1]
-        # mask = delta_t < 0
-        # delta_t[mask] = 1.0 + delta_t[mask]
-        # delta_t = torch.concat((delta_t, torch.ones(1, dtype=torch.float, device=self.get_device()) - delta_t[-1]))
-        #########
-        delta_t = border[1][1:] - border[1][:-1]
-        mask = delta_t < 0
-        # print("mask:", delta_t[mask])
-        # raise ValueError("STOP")
-        delta_t[mask] = 1.0 + delta_t[mask]
-        delta_t = torch.concat((delta_t, (1. - border[1][-1]).unsqueeze(0) ))
-
-        # # idx, times, states, marked idx, delta_t, augmented_states
-        # for idx, x, y, z, w, k in zip(border[0], border[1], border[2], border[3], delta_t, augmented_states):
-        #     print(f"{idx}\t{x}\t{y}\t{z}\t{w}\t{k}")
-        #     # print("border_times:", border[1])
-        #     # print("augmented_states:", augmented_states)
-        # raise ValueError("STOP")
-
-        integral_term = -self.get_intensity_integral(
-            time_list=border[1], pairs=utils.linearIdx2matIdx(border[0], n=self.get_nodes_num(), directed=self.is_directed()).to(torch.long),
+        # Get the augmented data
+        augmented_pairs, augmented_time_list, augmented_states, delta_t = self.get_augmented_data(
+            pairs=pairs, edges=edges, edge_times=edge_times, edge_states=edge_states
+        )
+        # Then compute the integral term
+        integral_term = self.get_intensity_integral(
+            time_list=augmented_time_list, pairs=augmented_pairs,
             delta_t=delta_t, states=augmented_states.to(torch.long)
         ).sum()
 
-        # print("non_integral_term:", non_integral_term)
-        # print("integral_term:", integral_term)
-
-        return -(non_integral_term + integral_term)
+        return -(non_integral_term - integral_term)
 
     def get_cov_factors(self, nodes: torch.Tensor, compute_R_factor_inv: bool = True) -> tuple:
 
