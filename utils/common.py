@@ -85,7 +85,7 @@ def linearIdx2matIdx(idx, n, dtype=torch.long, directed=False):
         col_idx = idx % (n-1)
         col_idx[col_idx >= row_idx] += 1
 
-        return torch.vstack((row_idx, col_idx))
+        return torch.vstack((row_idx, col_idx)).to(torch.long)
 
     else:
 
