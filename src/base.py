@@ -496,7 +496,7 @@ class BaseModel(torch.nn.Module):
         delta_t = torch.concat((delta_t, (1. - border[1][-1]).unsqueeze(0) ))
 
         # Convert idx to pairs
-        augmented_pairs = utils.linearIdx2matIdx(border[0], self.get_nodes_num(), self.is_directed()).to(torch.long)
+        augmented_pairs = utils.linearIdx2matIdx(border[0], self.get_nodes_num(), torch.long, self.is_directed())
         return augmented_pairs, border[1], augmented_states, delta_t
 
     def get_nll(self, pairs: torch.Tensor, edges: torch.LongTensor, edge_times: torch.FloatTensor,
