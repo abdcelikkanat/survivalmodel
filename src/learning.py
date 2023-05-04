@@ -66,7 +66,7 @@ class LearningModel(BaseModel, torch.nn.Module):
 
             self.get_x0_s(standardize=False).requires_grad = value
             if self.is_directed():
-                self.get_x0_r().requires_grad = value
+                self.get_x0_r(standardize=False).requires_grad = value
 
         elif param_name[0] == 'v':
 
@@ -74,7 +74,7 @@ class LearningModel(BaseModel, torch.nn.Module):
 
             self.get_v_s(standardize=False).requires_grad = value
             if self.is_directed():
-                self.get_v_r().requires_grad = value
+                self.get_v_r(standardize=False).requires_grad = value
 
         elif param_name == 'prior':
 
@@ -98,7 +98,8 @@ class LearningModel(BaseModel, torch.nn.Module):
         bs = BatchSampler(
             edges=dataset.get_edges(), edge_times=edge_times, edge_states=dataset.get_states(),
             nodes_num=self.get_nodes_num(), batch_size=self.__batch_size,
-            directed=self.is_directed(), device=self.get_device(), seed=self.get_seed()
+            directed=self.is_directed(), bin_bounds=self.get_bin_bounds(),
+            device=self.get_device(), seed=self.get_seed()
         )
 
         # Check the learning procedure
@@ -128,9 +129,9 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         # Define the parameter order for the optimization procedure
         # [x0], [x0, v1, v2], [x0, v1, v2, v3], ...
-        param_groups = [["x0", "v1"]] + [[f"v{b}"] for b in range(2, self.get_bins_num()+1)]
+        param_groups = [["x0", "v1"]] + [[f"v{b}"] for b in range(2, self.get_bins_num()+1)]        #param_groups = [["x0", "v1"]] + [[f"v{b}"] for b in range(2, self.get_bins_num()+1)]
         # Define the parameter weights for the optimization procedure
-        param_weights = torch.arange(1, self.get_bins_num()+1).to(torch.float)  #[1]*self.get_bins_num()
+        param_weights = torch.ones(self.get_bins_num()) #torch.arange(1, self.get_bins_num()+1).to(torch.float)  #[1]*self.get_bins_num()
 
         # Compute the epoch counts for each parameter group
         # group_epoch_counts = torch.arange(
@@ -149,6 +150,10 @@ class LearningModel(BaseModel, torch.nn.Module):
                 self.__set_gradients(param_name, True)
             # Dedicate a distinct optimizer to the current parameter group
             group_optimizers.append(self.__optimizer(self.parameters(), lr=self.__lr))
+
+            for param_name in current_group:
+                self.__set_gradients(param_name, False)
+
         # Set the gradients to False again
         for current_group in param_groups:
             for param_name in current_group:
@@ -157,23 +162,20 @@ class LearningModel(BaseModel, torch.nn.Module):
         # Run the epochs
         loss, nll = [], []
         epoch_num = 0
-        for current_epoch_count, optimizer, current_group in zip(group_epoch_counts, group_optimizers, param_groups):
+        for current_epoch_count, optimizer, current_group in zip(group_epoch_counts.tolist(), group_optimizers, param_groups):
             # Set the gradients to True again here
             for param_name in current_group:
                 self.__set_gradients(param_name, True)
-
+            # print(">>>>>", self.get_v_s()[10, 0, :])
             # if v is in the current group, then set the max edge time
-            max_edge_time = None
             for param in current_group:
                 if param[0] == 'v':
-                    max_edge_time = self.get_bin_width()*int(param[1:])
-                    # print("group:", current_group, f"Max edge time: {max_edge_time}")
-                    # print(f"Max edge time: {max_edge_time}", "epoch:", epoch_num, "current_epoch_count", current_epoch_count)
+                    bin_idx = int(param[1:]) - 1
 
             # Run the epochs
             for _ in range(current_epoch_count):
                 epoch_loss, epoch_nll = self.__train_one_epoch(
-                    bs=bs, max_edge_time=max_edge_time, epoch_num=epoch_num, optimizer=optimizer
+                    bs=bs, bin_idx=bin_idx, epoch_num=epoch_num, optimizer=optimizer
                 )
                 loss.append(epoch_loss)
                 nll.append(epoch_nll)
@@ -181,9 +183,13 @@ class LearningModel(BaseModel, torch.nn.Module):
                 # Increase the epoch number by one
                 epoch_num += 1
 
+            # Set the gradients to True again here
+            for param_name in current_group:
+                self.__set_gradients(param_name, False)
+
         return loss, nll
 
-    def __train_one_epoch(self, bs: BatchSampler, max_edge_time: float, epoch_num: int, optimizer: torch.optim.Optimizer):
+    def __train_one_epoch(self, bs: BatchSampler, bin_idx: int, epoch_num: int, optimizer: torch.optim.Optimizer):
 
         init_time = time.time()
 
@@ -191,7 +197,7 @@ class LearningModel(BaseModel, torch.nn.Module):
         epoch_loss, epoch_nll = [], []
         for batch_num in range(self.__steps_per_epoch):
 
-            batch_nll, batch_nlp = self.__train_one_batch(bs=bs, max_edge_time=max_edge_time, batch_num=batch_num)
+            batch_nll, batch_nlp = self.__train_one_batch(bs=bs, bin_idx=bin_idx, batch_num=batch_num)
             batch_loss = batch_nll + batch_nlp
 
             epoch_loss.append(batch_loss)
@@ -205,15 +211,13 @@ class LearningModel(BaseModel, torch.nn.Module):
         # Backward pass
         total_batch_loss.backward()
 
-        bin_idx = self.get_bin_index(torch.as_tensor([max_edge_time]))
-        if max_edge_time == 1.:
-            bin_idx = self.get_bins_num()
-        self.get_v_s(standardize=False).grad[bin_idx:, :, :] = 0
-        # self.get_v_s(standardize=False).grad[:bin_idx-1, :, :] = 0
+        # Set the gradients to 0 for the parameters that are not in the current bin
+        self.get_v_s(standardize=False).grad[bin_idx+1:, :, :] = 0
+        self.get_v_s(standardize=False).grad[:bin_idx, :, :] = 0
 
         # Perform a step
         optimizer.step()
-
+        # print(epoch_num, "---",  bin_idx, "---", self.get_v_s(standardize=False)[1, :, :])
         # Get the average epoch loss
         avg_loss = total_batch_loss / float(self.__steps_per_epoch)
 
@@ -227,37 +231,39 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         return epoch_loss, epoch_nll
 
-    def __train_one_batch(self, bs: BatchSampler, max_edge_time: float, batch_num: int):
+    def __train_one_batch(self, bs: BatchSampler, bin_idx: int, batch_num: int):
 
         self.train()
 
         # Sample a batch
-        batch_nodes, batch_pairs, batch_edges, batch_edge_times, batch_edge_states = bs.sample(max_edge_time)
+        batch_nodes, expanded_pairs, expanded_times, expanded_states, is_edge, delta_t = bs.sample(bin_idx)
 
         # Compute the R factor inverse if the batch number is 0
         compute_R_factor_inv = True if batch_num == 0 else False
 
         # Finally, compute the negative log-likelihood and the negative log-prior for the batch
+
         batch_nll, batch_nlp = self.forward(
-            nodes=batch_nodes, pairs=batch_pairs, batch_edges=batch_edges, 
-            batch_edge_times=batch_edge_times, batch_states=batch_edge_states, 
-            max_edge_time=max_edge_time, compute_R_factor_inv=compute_R_factor_inv
+            nodes=batch_nodes, pairs=expanded_pairs, times=expanded_times, states=expanded_states,
+            is_edge=is_edge, delta_t=delta_t, compute_R_factor_inv=compute_R_factor_inv
         )
 
         # Divide the batch loss by the number of all possible pairs
-        average_batch_nll = batch_nll / float(batch_pairs.shape[1])
-        average_batch_nlp = batch_nlp / float(batch_pairs.shape[1])
+        average_batch_nll = batch_nll / float(len(batch_nodes) * (len(batch_nodes) - 1))
+        average_batch_nlp = batch_nlp / float(len(batch_nodes) * (len(batch_nodes) - 1))
+        if not self.is_directed():
+            average_batch_nll /= 2.
+            average_batch_nlp /= 2.
 
         return average_batch_nll, average_batch_nlp
 
-    def forward(self, nodes: torch.Tensor, pairs: torch.LongTensor, batch_edges:torch.LongTensor, 
-                batch_edge_times: torch.FloatTensor, batch_states: torch.LongTensor,
-                max_edge_time: float, compute_R_factor_inv=True):
+    def forward(self, nodes: torch.Tensor, pairs: torch.LongTensor, times: torch.FloatTensor,
+                states: torch.LongTensor, is_edge: torch.BoolTensor, delta_t: torch.FloatTensor,
+                compute_R_factor_inv=True):
 
         # Get the negative log-likelihood
         nll = self.get_nll(
-            pairs=pairs, edges=batch_edges, edge_times=batch_edge_times,
-            edge_states=batch_states, max_edge_time=max_edge_time
+            pairs=pairs, times=times, states=states, is_edge=is_edge, delta_t=delta_t
         )
 
         # Get the negative log-prior and the R-factor inverse
