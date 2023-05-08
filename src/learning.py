@@ -10,27 +10,27 @@ from src.sampler import BatchSampler
 class LearningModel(BaseModel, torch.nn.Module):
 
     def __init__(self, nodes_num: int, directed: bool, bins_num: int, dim: int,
-                 prior_lambda: float = 1e5, k=10, lr: float = 0.1, batch_size: int = None, epoch_num: int = 100, steps_per_epoch=1, 
+                 prior_lambda: float = 1e5, k=10,
                  device: torch.device = 'cpu', verbose: bool = False, seed: int = 19):
 
         utils.set_seed(seed)
 
         super(LearningModel, self).__init__(
-            x0_s = torch.nn.Parameter(2. * torch.rand(size=(nodes_num, dim), device=device) - 1., requires_grad=False), 
-            x0_r = torch.nn.Parameter(2. * torch.rand(size=(nodes_num, dim), device=device) - 1., requires_grad=False) if directed else None,
-            v_s = torch.nn.Parameter(torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False),
-            v_r = torch.nn.Parameter(torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False) if directed else None,
-            beta_s = torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False),
-            beta_r = torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False) if directed else None,
-            prior_lambda = torch.as_tensor(prior_lambda, dtype=torch.float, device=device),
-            prior_sigma_s = torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False), 
-            prior_sigma_r = torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False) if directed else None,
-            prior_B_x0_logit_c_s = torch.nn.Parameter(torch.special.logit(torch.rand(size=(1, ), device=device)), requires_grad=False), 
-            prior_B_x0_logit_c_r = torch.nn.Parameter(torch.special.logit(torch.rand(size=(1, ), device=device)), requires_grad=False) if directed else None,
-            prior_B_ls_s = torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False), 
-            prior_B_ls_r = torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False) if directed else None,
-            prior_C_Q_s = torch.nn.Parameter(2. * torch.rand(size=(nodes_num, k), device=device) - 1,  requires_grad=False), 
-            prior_C_Q_r = torch.nn.Parameter(2. * torch.rand(size=(nodes_num, k), device=device) - 1,  requires_grad=False)  if directed else None,
+            x0_s=torch.nn.Parameter(2. * torch.rand(size=(nodes_num, dim), device=device) - 1., requires_grad=False),
+            x0_r=torch.nn.Parameter(2. * torch.rand(size=(nodes_num, dim), device=device) - 1., requires_grad=False) if directed else None,
+            v_s=torch.nn.Parameter(torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False),
+            v_r=torch.nn.Parameter(torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False) if directed else None,
+            beta_s=torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False),
+            beta_r=torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False) if directed else None,
+            prior_lambda=torch.as_tensor(prior_lambda, dtype=torch.float, device=device),
+            prior_sigma_s=torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False),
+            prior_sigma_r=torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False) if directed else None,
+            prior_B_x0_logit_c_s=torch.nn.Parameter(torch.special.logit(torch.rand(size=(1, ), device=device)), requires_grad=False),
+            prior_B_x0_logit_c_r=torch.nn.Parameter(torch.special.logit(torch.rand(size=(1, ), device=device)), requires_grad=False) if directed else None,
+            prior_B_ls_s=torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False),
+            prior_B_ls_r=torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False) if directed else None,
+            prior_C_Q_s=torch.nn.Parameter(2. * torch.rand(size=(nodes_num, k), device=device) - 1,  requires_grad=False),
+            prior_C_Q_r=torch.nn.Parameter(2. * torch.rand(size=(nodes_num, k), device=device) - 1,  requires_grad=False)  if directed else None,
             prior_R_factor_inv_s = None, prior_R_factor_inv_r = None,
             directed=directed,
             device=device,
@@ -38,17 +38,16 @@ class LearningModel(BaseModel, torch.nn.Module):
             seed=seed
         )
 
-        # Optimization parameters
-        self.__lp = "sequential" # Learning procedure
-        self.__lr = lr # Learning rate
-        self.__batch_size = nodes_num if batch_size is None else batch_size # Batch size
-        self.__epoch_num = epoch_num # Number of epochs
-        self.__steps_per_epoch = steps_per_epoch # Number of steps per epoch
-        self.__optimizer = torch.optim.Adam # Optimizer
-
+        # Learning parameters
+        self.__lp = "sequential"  # Learning procedure
+        self.__optimizer = torch.optim.Adam  # Optimizer
+        # - The following parameters are set in the learn() method
         self.__min_time = None
         self.__max_time = None
-
+        self.__lr = None  # Learning rate
+        self.__batch_size = None   # Batch size
+        self.__epoch_num = None  # Number of epochs
+        self.__steps_per_epoch = None  # Number of steps per epoch
 
     def __set_gradients(self, beta_grad=None, x0_grad=None, v_grad=None, prior_grad=None):
         '''
@@ -68,13 +67,13 @@ class LearningModel(BaseModel, torch.nn.Module):
         if x0_grad is not None:
             self.get_x0_s(standardize=False).requires_grad = x0_grad
             if self.is_directed():
-                self.get_x0_r().requires_grad = x0_grad
+                self.get_x0_r(standardize=False).requires_grad = x0_grad
 
         # Set the gradient of the velocities
         if v_grad is not None:
             self.get_v_s(standardize=False).requires_grad = v_grad
             if self.is_directed():
-                self.get_v_r().requires_grad = v_grad
+                self.get_v_r(standardize=False).requires_grad = v_grad
                 
         # Set the gradient of the all prior parameters
         if prior_grad is not None:
@@ -82,14 +81,21 @@ class LearningModel(BaseModel, torch.nn.Module):
                 if '_prior' in name:
                     param.requires_grad = prior_grad
 
-    def learn(self, dataset, loss_file_path=None):
+    def learn(self, dataset, lr: float = 0.1, batch_size: int = 0, epoch_num: int = 100, steps_per_epoch=1,
+              loss_file_path=None):
+
+        # Set the learning parameters
+        self.__lr = lr
+        self.__batch_size = self.get_nodes_num() if batch_size == 0 else batch_size
+        self.__epoch_num = epoch_num
+        self.__steps_per_epoch = steps_per_epoch
 
         # Scale the edge times to [0, 1]
         edge_times = dataset.get_times()
         self.__min_time = edge_times.min()
         self.__max_time = edge_times.max()
         edge_times = (edge_times - self.__min_time) / (self.__max_time - self.__min_time)
-
+        print(dataset.get_edges().shape)
         # Define the batch sampler
         bs = BatchSampler(
             edges=dataset.get_edges(), edge_times=edge_times, edge_states=dataset.get_states(),
@@ -147,7 +153,7 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         # Determine the number of epochs for each parameter group
         group_epoch_counts = (self.__epoch_num * torch.cumsum(
-            torch.as_tensor([0] + self.group_epoch_weights, device=self.get_device(), dtype=torch.float), dim=0
+            torch.as_tensor([0.] + self.group_epoch_weights, device=self.get_device(), dtype=torch.float), dim=0
         ) / sum(self.group_epoch_weights)).type(torch.int)
         group_epoch_counts = group_epoch_counts[1:] - group_epoch_counts[:-1]
 
@@ -161,6 +167,7 @@ class LearningModel(BaseModel, torch.nn.Module):
 
             # Run the epochs
             for _ in range(current_epoch_count):
+                # Run one epoch
                 epoch_loss, epoch_nll = self.__train_one_epoch(bs=bs, epoch_num=epoch_num, optimizer=optimizer)
                 loss.append(epoch_loss)
                 nll.append(epoch_nll)
@@ -168,13 +175,16 @@ class LearningModel(BaseModel, torch.nn.Module):
                 # Increase the epoch number by one
                 epoch_num += 1
 
+            # Set the gradients to False
+            self.__set_gradients(**{f"{param_name}_grad": False for param_name in current_group})
+
         return loss, nll
 
     def __train_one_epoch(self, bs: BatchSampler, epoch_num: int, optimizer: torch.optim.Optimizer):
 
         init_time = time.time()
 
-        total_batch_loss = 0
+        total_batch_loss = 0.
         epoch_loss, epoch_nll = [], []
         for batch_num in range(self.__steps_per_epoch):
 
@@ -208,44 +218,40 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         return epoch_loss, epoch_nll
 
-    def __train_one_batch(self, bs: BatchSampler, batch_num: int):
+    def __train_one_batch(self, bs: BatchSampler, batch_num: int) -> tuple[torch.Tensor, torch.Tensor]:
 
         self.train()
 
         # Sample a batch
-        batch_nodes, batch_pairs, batch_edges, batch_edge_times, batch_edge_states = bs.sample()
-        # print("nodes:", batch_nodes)
-        # print("pairs:", batch_pairs)
-        # print("edges:", batch_edges)
-        # print("edge_times:", batch_edge_times)
-        # print("edge_states:", batch_edge_states)
-
-
+        batch_nodes, expanded_pairs, expanded_times, expanded_states, is_edge, delta_t = bs.sample()
 
         # Compute the R factor inverse if the batch number is 0
         compute_R_factor_inv = True if batch_num == 0 else False
 
         # Finally, compute the negative log-likelihood and the negative log-prior for the batch
         batch_nll, batch_nlp = self.forward(
-            nodes=batch_nodes, pairs=batch_pairs, batch_edges=batch_edges, 
-            batch_edge_times=batch_edge_times, batch_states=batch_edge_states, 
-            compute_R_factor_inv=compute_R_factor_inv
+            nodes=batch_nodes, pairs=expanded_pairs, times=expanded_times, states=expanded_states,
+            is_edge=is_edge, delta_t=delta_t, compute_R_factor_inv=compute_R_factor_inv
         )
 
         # Divide the batch loss by the number of all possible pairs
-        average_batch_nll = batch_nll / float(batch_pairs.shape[1])
-        average_batch_nlp = batch_nlp / float(batch_pairs.shape[1])
+        average_batch_nll = batch_nll / float(self.__batch_size * (self.__batch_size - 1))
+        average_batch_nlp = batch_nlp / float(self.__batch_size * (self.__batch_size - 1))
+        if not self.is_directed():
+            average_batch_nll /= 2.
+            average_batch_nlp /= 2.
 
         return average_batch_nll, average_batch_nlp
 
-    def forward(self, nodes: torch.Tensor, pairs: torch.LongTensor, batch_edges:torch.LongTensor, 
-                batch_edge_times: torch.FloatTensor, batch_states: torch.LongTensor, compute_R_factor_inv=True):
+    def forward(self, nodes: torch.Tensor, pairs: torch.LongTensor, times: torch.FloatTensor,
+                states: torch.LongTensor, is_edge: torch.BoolTensor, delta_t: torch.FloatTensor,
+                compute_R_factor_inv=True) -> tuple[torch.Tensor, torch.Tensor]:
 
         # Get the negative log-likelihood
-        nll = self.get_nll(pairs=pairs, edges=batch_edges, edge_times=batch_edge_times, edge_states=batch_states)
+        nll = self.get_nll(pairs=pairs, times=times, states=states, is_edge=is_edge, delta_t=delta_t)
 
         # Get the negative log-prior and the R-factor inverse
-        nlp = 0 #self.get_neg_log_prior(nodes=nodes, compute_R_factor_inv=compute_R_factor_inv)
+        nlp = 0  #self.get_neg_log_prior(nodes=nodes, compute_R_factor_inv=compute_R_factor_inv)
 
         return nll, nlp
 
@@ -262,10 +268,10 @@ class LearningModel(BaseModel, torch.nn.Module):
             'dim': self.get_dim(),
             'prior_lambda': self.get_prior_lambda(), 
             'k': self.get_prior_k(),
-            'lr': self.__lr,
-            'batch_size':  self.__batch_size,
-            'epoch_num': self.__epoch_num,
-            'steps_per_epoch': self.__steps_per_epoch,
+            # 'lr': self.__lr,
+            # 'batch_size':  self.__batch_size,
+            # 'epoch_num': self.__epoch_num,
+            # 'steps_per_epoch': self.__steps_per_epoch,
             'verbose': self.get_verbose(), 
             'seed': self.get_seed()
         }

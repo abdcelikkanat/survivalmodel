@@ -1,4 +1,6 @@
 import re
+
+import utils
 from utils.common import INF
 import torch
 
@@ -71,7 +73,6 @@ class Dataset:
                     if len(tokens) > 3:
                         edge_states.append( int(tokens[3]) )
 
-
         # Split the columns
         self.__edges = torch.as_tensor(edges, dtype=torch.long).T
         self.__times = torch.as_tensor(edge_times, dtype=torch.long) # Unix timestamp
@@ -92,7 +93,7 @@ class Dataset:
         sorted_indices = self.__times.argsort()
         self.__edges = self.__edges[:, sorted_indices]
         self.__times = self.__times[sorted_indices]
-        self.__states = None if self.__states is None else self.__states[sorted_indices]
+        self.__states = self.__states[sorted_indices] if len(edge_states) > 0 else None
 
         # If the minimum and maximum time are not given, set them
         self.__init_time = self.__times.min()
@@ -131,7 +132,12 @@ class Dataset:
         '''
         self.__last_time = last_time
 
+    def write_data(self, file_path: str):
 
+        # Write the edges
+        with open(file_path, 'w') as f:
+            for edge, time, state in zip(self.get_edges().T, self.get_times(), self.get_states()):
+                f.write(f"{edge[0]}\t{edge[1]}\t{time}\t{state}\n")
 
     # def split_over_time(self, split_ratio: float = 0.9, remove_isolated_nodes: bool = True):
     #     '''
@@ -210,51 +216,86 @@ class Dataset:
     # 
     #     return None
 
-    def get_data(self):
-        '''
+    def get_data(self, states=False):
+        """"
         Get all data
-        '''
+        :param states: if True, return the states
+        :return: edges, times, states (if states=True)
+        """
 
-        if self.__states is None:
-
-            return self.__edges, self.__times
-
+        if states:
+            return self.get_edges(), self.get_times(), self.get_states()
         else:
+            return self.get_edges(), self.get_times()
 
-            return self.__edges, self.__times, self.__states
-
-    def get_edges(self):
-        '''
+    def get_edges(self, idx: int = None) -> torch.Tensor:
+        """
         Get the edges
-        '''
-        return self.__edges
+        """
+        if idx is None:
+            return self.__edges
+        else:
+            return self.__edges[idx]
 
-    def get_times(self):
-        '''
+    def get_times(self) -> torch.Tensor:
+        """
         Get the edge times
-        '''
+        """
 
         return self.__times
 
-    def get_states(self):
-        '''
+    def get_states(self) -> torch.Tensor:
+        """
         Get the states
-        '''
-        return self.__states
+        """
 
-    def get_adj_list(self):
-
-        adj_list = [[] for _ in range(self.__nodes_num)]
-
+        # If states is None, construct the states tensor
         if self.__states is None:
-            for i, j, t in zip(self.__edges[0], self.__edges[1], self.__times):
-                adj_list[i].append((j, t))
+            # Represent the edges in a flat index format
+            edge_flat_idx = utils.pairIdx2flatIdx(self.get_edges(0), self.get_edges(1), self.__nodes_num, self.__directed)
+            # Get the unique indices and their counts
+            _, idx_counts = torch.unique(edge_flat_idx, sorted=True, return_counts=True)
+            # Construct a mask
+            mask = torch.arange(max(idx_counts)).expand(len(idx_counts), -1) < idx_counts.unsqueeze(1)
+            # Construct a tensor consisting of consecutive 0s and 1s
+            zero_one_tensor = torch.zeros(max(idx_counts))
+            zero_one_tensor[torch.arange(max(idx_counts)) % 2 == 0] = 1
+            # Construct the states tensor which is in the ordered  format
+            ordered_states = zero_one_tensor.expand(len(idx_counts), -1)[mask]
+            # Construct the states in the correct order with respect to the edges
+            idx = torch.argsort(edge_flat_idx, stable=True).argsort(stable=True)
+
+            return ordered_states[idx]
+
         else:
-            for i, j, t, s in zip(self.__edges[0], self.__edges[1], self.__times, self.__states):
-                adj_list[i].append((j, t, s))
 
-        return adj_list
+            return self.__states
 
+    def get_data_dict(self):
+        """
+        Get the data in a dictionary format
+        :return: a dictionary with keys the source nodes and values a dictionary with keys the target nodes and values
+        """
+
+        # adj_list = [[] for _ in range(self.__nodes_num)]
+        #
+        # for i, j, t, s in zip(self.get_edges(0), self.get_edges(1), self.get_times(), self.get_states()):
+        #     adj_list[i].append((j, t, s))
+        #
+        # return adj_list
+
+        data_dict = {}
+        for i, j, t, s in zip(self.get_edges(0), self.get_edges(1), self.get_times(), self.get_states()):
+
+            if i.item() in data_dict:
+                if j.item() in data_dict[i.item()]:
+                    data_dict[i.item()][j.item()].append((t, s))
+                else:
+                    data_dict[i.item()][j.item()] = [(t, s)]
+            else:
+                data_dict[i.item()] = {j.item(): [(t, s)]}
+
+        return data_dict
 
     def has_isolated_nodes(self):
         '''

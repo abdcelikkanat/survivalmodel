@@ -1,146 +1,139 @@
+import torch
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-import numpy as np
 import seaborn as sns
-from utils import pairIdx2flatIdx
-from src.dataset import Dataset
+
 
 class Animation:
 
-    def __init__(self, embs, frame_times: np.asarray = None, dataset: Dataset = None, directed=False,
-                 figsize=(12, 10), node_sizes=100, node2color: list = None,
-                 color_palette="rocket_r", padding=0.1, fps=6,):
-
-        self._figsize = figsize
-        self._anim = None
-        self._fps = fps
+    def __init__(self, rt_s: torch.Tensor, rt_r: torch.Tensor, frame_times: torch.Tensor, data_dict: dict = None,
+                 title: bool = True, font_size: int = 16, fig_size: tuple = (12, 10), fps: int = 6,
+                 padding=0, edge_alpha: float = 0.35, edge_width=1, edge_color='k', node_sizes=100, node_colors='b',
+                 color_palette="rocket_r",
+                 ):
 
         # Data properties
-        self._embs_s = embs[0]
-        self._embs_r = embs[1] if directed else None
-        self._frame_times = frame_times
-        pair2id, self._event_pairs, self._event_times, self._event_states = dict(), [], [], []
-        for pair, e, s in zip(dataset.get_edges().T.tolist(), dataset.get_times(), dataset.get_states()): #zip(data[0], data[1]):
-            pair_idx = pairIdx2flatIdx(pair[0], pair[1], self._embs_s.shape[1], directed=directed)
-            if pair_idx not in pair2id:
-                pair2id[pair_idx] = len(pair2id)
-                self._event_pairs.append(pair)
-                self._event_times.append([e])
-                self._event_states.append([s])
-            else:
-                self._event_times[pair2id[pair_idx]].append(e)
-                self._event_states[pair2id[pair_idx]].append(s)
+        self._nodes_num = rt_s.shape[1]
+        self._frames_num = rt_s.shape[0]
+        # self._directed = False if rt_r is None else True
 
-        self._directed = directed
-        self._frames_num = self._embs_s.shape[0]
-        self._nodes_num = self._embs_s.shape[1]
-        self._dim = self._embs_s.shape[2]
+        # Set the latent representations and frame times
+        self._rt_s = rt_s
+        self._rt_r = rt_r
+        self._frame_times = frame_times
+
+        # Other optional parameters
+        self._data_dict = data_dict
 
         # Visual properties
         sns.set_theme(style="ticks")
-        node2color = [0]*self._nodes_num if node2color is None else node2color
-        self._color_num = 1 if node2color is None else len(set(node2color))
-        self._palette = sns.color_palette(color_palette, self._color_num)
-        self._node_colors = [self._palette.as_hex()[node2color[node]] for node in range(self._nodes_num)]
-        self._node_sizes = [node_sizes]*self._nodes_num if type(node_sizes) is int else node_sizes
-        self._linewidths = 1
-        self._edgecolors = 'k'
+        self._palette = sns.color_palette(color_palette,  n_colors=self._nodes_num)
+        self._title = title
+        self._font_size = font_size
+        self._fig_size = fig_size
+        self._fps = fps
         self._padding = padding
+        self._edge_alpha = edge_alpha
+        self._edge_width = edge_width
+        self._edge_color = edge_color
+        self._node_sizes = node_sizes if type(node_sizes) is list else [node_sizes] * self._nodes_num
+        self._node_colors = node_colors if type(node_colors) is list else self._palette.as_hex()
 
     def _render(self, fig, repeat=False):
         global sc, sc_r, ax
 
         def __set_canvas():
+            """
+            Set the canvas of the animation
+            """
 
-            xy_min = self._embs_s.min(axis=0, keepdims=False).min(axis=0, keepdims=False)
-            xy_max = self._embs_s.max(axis=0, keepdims=False).max(axis=0, keepdims=False)
-            if self._directed:
-                xy_min_r = self._embs_r.min(axis=0, keepdims=False).min(axis=0, keepdims=False)
-                xy_max_r = self._embs_r.max(axis=0, keepdims=False).max(axis=0, keepdims=False)
+            # Find the minimum and maximum values of the data
+            xy_min = self._rt_s.min(dim=0, keepdim=False)[0].min(dim=0, keepdim=False)[0]
+            xy_max = self._rt_s.max(dim=0, keepdim=False)[0].max(dim=0, keepdim=False)[0]
+            if self._rt_r is not None:
+                xy_min_r = self._rt_r.min(dim=0, keepdims=False)[0].min(dim=0, keepdims=False)[0]
+                xy_max_r = self._rt_r.max(dim=0, keepdims=False)[0].max(dim=0, keepdims=False)[0]
 
-                xy_min = np.minimum(xy_min, xy_min_r)
-                xy_max = np.maximum(xy_max, xy_max_r)
+                xy_min = torch.min(xy_min, xy_min_r)
+                xy_max = torch.max(xy_max, xy_max_r)
 
-            xlen_padding = (xy_max[0] - xy_min[0]) * self._padding
-            ylen_padding = (xy_max[1] - xy_min[1]) * self._padding
-            ax.set_xlim([xy_min[0] - xlen_padding, xy_max[0] + xlen_padding])
-            ax.set_ylim([xy_min[1] - ylen_padding, xy_max[1] + ylen_padding])
+            # Set the canvas sizes and limits with the additional padding value
+            ax.set_xlim([xy_min[0] - self._padding, xy_max[0] + self._padding])
+            ax.set_ylim([xy_min[1] - self._padding, xy_max[1] + self._padding])
 
         def __init_func():
             global sc, sc_r, ax
 
+            # Set the figure
             sc = ax.scatter(
                 [0]*self._nodes_num, [0]*self._nodes_num,
                 s=self._node_sizes, c=self._node_colors,
-                linewidths=self._linewidths, edgecolors=self._edgecolors
+                linewidths=self._edge_width, edgecolors=self._edge_color
             )
             sc_r = None
-            if self._directed:
+            if self._rt_r is not None:
                 sc_r = ax.scatter(
                     [0]*self._nodes_num, [0]*self._nodes_num,
                     s=self._node_sizes, c=self._node_colors,
-                    linewidths=self._linewidths, edgecolors=self._edgecolors,
+                    linewidths=self._edge_width, edgecolors=self._edge_color,
                     marker='>'
                 )
 
+            # Set the canvas
             __set_canvas()
 
-        def __func(f):
+        def __func(frame_idx):
             global sc, sc_r, ax
 
+            # Clear the previous edges
             for line in list(ax.lines):
                 ax.lines.remove(line)
 
-            ax.set_title("Time (t={:0.2f})".format(self._frame_times[f]), fontsize=16)
+            # Get the current frame time
+            current_frame_time = self._frame_times[frame_idx]
+
+            # The title will be the current frame time
+            if self._title:
+                ax.set_title("Time (t={:0.2f})".format(current_frame_time, fontsize=self._font_size))
 
             # Plot the nodes
-            sc.set_offsets(np.c_[self._embs_s[f, :, 0], self._embs_s[f, :, 1]])
-            
-            if self._directed:
-                sc_r.set_offsets(np.c_[self._embs_r[f, :, 0], self._embs_r[f, :, 1]])
+            sc.set_offsets(self._rt_s[frame_idx, :, :])
+            if self._rt_r is not None:
+                sc_r.set_offsets(self._rt_r[frame_idx, :, :])
 
-            # Plot the event links
-            if self._event_times is not None and self._event_pairs is not None:
+            # Plot the edges if the dataset is given
+            if self._data_dict is not None:
 
-                for pair_events, pair_states, pair in zip(self._event_times, self._event_states, self._event_pairs):
+                for i in self._data_dict.keys():
+                    for j in self._data_dict[i].keys():
 
-                    # Get the i, j indices of the pair
-                    i, j = pair
-
-                    # Find the index of the list of event times that is the closest to the frame time
-                    idx = np.argmin(abs(self._frame_times[f] - pair_events))
-
-                    current_state = None
-                    if self._frame_times[f] < pair_events[idx]:
-                        if idx == 0:
-                            current_state = not pair_states[idx]
+                        # Get the state of the largest event time which is smaller than the current frame time
+                        index = torch.bucketize(
+                            input=torch.as_tensor([current_frame_time]),
+                            boundaries=torch.as_tensor([t for t, _ in self._data_dict[i][j]]), right=False
+                        )
+                        # If the frame time is smaller than the smallest event time, then the state is 0 by assumption
+                        if index == 0:
+                            ij_frame_state = 0
+                            ij_diff = current_frame_time
                         else:
-                            current_state = pair_states[idx - 1]
-                    else:
-                        current_state = pair_states[idx]
+                            ij_frame_state = self._data_dict[i][j][index-1][1]
+                            ij_diff = current_frame_time - self._data_dict[i][j][index-1][0]
 
-                    # Since the number of events that are smaller or equal to the frame time is odd, self._frame_times[f] >= pair_events[idx]
-                    # Set the alpha value to 1 if there is only one event (idx must be 0 in this case) or the index is the last event
-                    if current_state:
-                        alpha = 1
-                    else:
-                        # assert self._frame_times[f] >= pair_events[idx], f"Ohh No! {self._frame_times[f]}, {pair_events[idx]}"
-                        alpha = 0 #1 - (self._frame_times[f]-pair_events[idx])/(pair_events[idx+1]-pair_events[idx])
-
-                    if self._directed:
-                        ax.plot(
-                            [self._embs_s[f, i, 0], self._embs_r[f, j, 0]],
-                            [self._embs_s[f, i, 1], self._embs_r[f, j, 1]],
-                            color='k',
-                            alpha=alpha
-                        )
-                    else:
-                        ax.plot(
-                            [self._embs_s[f, i, 0], self._embs_s[f, j, 0]],
-                            [self._embs_s[f, i, 1], self._embs_s[f, j, 1]],
-                            color='k',
-                            alpha=alpha
-                        )
+                        if ij_frame_state > 0:
+                            ax.plot(
+                                [self._rt_s[frame_idx, i, 0], self._rt_s[frame_idx, j, 0]],
+                                [self._rt_s[frame_idx, i, 1], self._rt_s[frame_idx, j, 1]],
+                                color=self._edge_color,
+                                alpha=self._edge_alpha,
+                            )
+                        else:
+                            ax.plot(
+                                [self._rt_s[frame_idx, i, 0], self._rt_s[frame_idx, j, 0]],
+                                [self._rt_s[frame_idx, i, 1], self._rt_s[frame_idx, j, 1]],
+                                color=self._edge_color,
+                                alpha=0,
+                            )
 
         anim = animation.FuncAnimation(
             fig=fig, init_func=__init_func, func=__func, frames=self._frames_num, interval=200, repeat=repeat
@@ -151,19 +144,18 @@ class Animation:
     def save(self, filepath, format="mp4"):
         global sc, sc_r, ax
 
-        fig, ax = plt.subplots(figsize=self._figsize, frameon=True)
-        # ax.set_axis_off()
-        # fig.subplots_adjust(left=0, bottom=0, right=1, top=0.95)
+        # Set the figure
+        fig, ax = plt.subplots(figsize=self._fig_size, frameon=True)
+        ax.set_axis_off()
+        fig.subplots_adjust(left=0, bottom=0, right=1, top=0.95)
 
+        # Runt the animation
         self._anim = self._render(fig)
-        
 
         if format == "mp4":
             writer = animation.FFMpegWriter(fps=self._fps)
-
         elif format == "gif":
             writer = animation.PillowWriter(fps=self._fps)
-
         else:
             raise ValueError("Invalid format!")
 

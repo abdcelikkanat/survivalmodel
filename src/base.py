@@ -406,7 +406,7 @@ class BaseModel(torch.nn.Module):
         return torch.exp(self.get_log_intensity_at(time_list=time_list, edges=edges, edge_states=edge_states))
 
     def get_intensity_integral(self, time_list: torch.Tensor, pairs: torch.Tensor, delta_t: torch.Tensor, states: torch.Tensor, standardize: bool = True) -> torch.Tensor:
-        '''
+        """
         Computes the negative log-likelihood function of the model
 
         :param time_list: a vector of shape L
@@ -414,7 +414,8 @@ class BaseModel(torch.nn.Module):
         :param delta_t: a vector of shape L
         :param states: a vector of shape L
         :return:
-        '''
+        """
+        
         # Compute the bin indices and residul times of the given time points
         bin_indices = self.get_bin_index(time_list=time_list)
 
@@ -433,96 +434,32 @@ class BaseModel(torch.nn.Module):
         r = delta_r_v * inv_norm_delta_v
 
         term0 = 0.5 * torch.sqrt(torch.as_tensor(utils.PI, device=self.__device)) * inv_norm_delta_v
-        term1 = torch.exp(beta_ij - (2*states-1)*( r**2 - norm_delta_r**2) )
+        term1 = torch.exp(beta_ij - (2*states-1)*(r**2 - norm_delta_r**2) )
 
-        term2_u = (1-states)*torch.erf(delta_t * norm_delta_v + r) + states*utils.erfi_approx(delta_t * norm_delta_v + r)
+        term2_u = (1-states)*torch.erf(delta_t*norm_delta_v+r) + states*utils.erfi_approx(delta_t*norm_delta_v+r)
         term2_l = (1-states)*torch.erf(r) + states*utils.erfi_approx(r)
 
         return term0 * term1 * (term2_u - term2_l)
 
-    def get_augmented_data(self, pairs: torch.Tensor, edges: torch.LongTensor,
-                           edge_times: torch.FloatTensor, edge_states: torch.LongTensor) -> tuple:
-        """
-        CAugmented data consist of given edge times/states and the border times/states
-
-        :param pairs: a matrix of shape 2 x L
-        :param edges: a matrix of shape 2 x L
-        :param edge_times: a vector of shape L
-        :param edge_states: a vector of shape L
-        :return augmented idx, times, states and delta_t:
-        """
-
-        #########
-        # Store the corresponding border and edge indices of the pairs
-        border_idx = torch.concat((
-            utils.pairIdx2flatIdx(
-                pairs[0], pairs[1], self.get_nodes_num(), directed=self.is_directed()
-            ).repeat_interleave(repeats=self.get_bins_num(), dim=0),
-            utils.pairIdx2flatIdx(
-                edges[0], edges[1], self.get_nodes_num(), directed=self.is_directed()
-            )
-        ))
-        # Store the corresponding border and edge times
-        border_times = torch.concat((
-            self.get_bin_bounds()[:-1].repeat(pairs.shape[1]),
-            edge_times
-        ))
-        # Store the corresponding border and edge states
-        border_states = torch.concat((
-            torch.zeros(self.get_bins_num() * pairs.shape[1], dtype=torch.float, device=self.get_device()),
-            edge_states.to(torch.float)
-        ))
-
-        # Mark the first time of bin borders to detect later the  and all the edges
-        border_marked_idx = torch.concat((
-            torch.eye(1, self.get_bins_num(), dtype=torch.float, device=self.get_device()).squeeze(0).repeat(pairs.shape[1]),
-            torch.ones(len(edge_states), dtype=torch.float, device=self.get_device())
-        ))
-        # Concatenate all the tensors
-        border = torch.vstack((border_idx, border_times, border_states, border_marked_idx))
-
-        # Firstly, sort with respect to the pair indices, then time and finally states.
-        border = border[:, border[2].argsort(stable=True)]
-        border = border[:, border[1].argsort(stable=True)]
-        border = border[:, border[0].argsort(stable=True)]
-
-        cumsum1 = border[3].cumsum(0) - 1
-        counts = torch.bincount(cumsum1.to(torch.long))
-        augmented_states = torch.repeat_interleave(border[2][border[3].to(torch.bool) == 1], counts )
-
-        delta_t = border[1][1:] - border[1][:-1]
-        mask = delta_t < 0
-        delta_t[mask] = 1.0 + delta_t[mask]
-        delta_t = torch.concat((delta_t, (1. - border[1][-1]).unsqueeze(0) ))
-
-        # Convert idx to pairs
-        augmented_pairs = utils.linearIdx2matIdx(border[0], self.get_nodes_num(), torch.long, self.is_directed())
-        return augmented_pairs, border[1], augmented_states, delta_t
-
-    def get_nll(self, pairs: torch.Tensor, edges: torch.LongTensor, edge_times: torch.FloatTensor,
-                edge_states: torch.LongTensor) -> torch.Tensor:
+    def get_nll(self, pairs: torch.Tensor, times: torch.FloatTensor, states: torch.LongTensor,
+                is_edge: torch.BoolTensor, delta_t: torch.FloatTensor) -> torch.Tensor:
         """
         Computes the negative log-likelihood function of the model
-
         :param pairs: a matrix of shape 2 x L
-        :param edges: a vector of shape L
-        :param edge_times: a vector of shape L
-        :param edge_states: a vector of shape L
+        :param times: a vector of shape L
+        :param states: a vector of shape L
+        :param is_edge: a vector of shape L
+        :param delta_t: a vector of shape L
         :return:
         """
 
         non_integral_term = self.get_log_intensity_at(
-            time_list=edge_times, edges=edges, edge_states=edge_states
+            time_list=times[is_edge], edges=pairs[:, is_edge], edge_states=states[is_edge]
         ).sum()
 
-        # Get the augmented data
-        augmented_pairs, augmented_time_list, augmented_states, delta_t = self.get_augmented_data(
-            pairs=pairs, edges=edges, edge_times=edge_times, edge_states=edge_states
-        )
         # Then compute the integral term
         integral_term = self.get_intensity_integral(
-            time_list=augmented_time_list, pairs=augmented_pairs,
-            delta_t=delta_t, states=augmented_states.to(torch.long)
+            time_list=times, pairs=pairs, delta_t=delta_t, states=states
         ).sum()
 
         return -(non_integral_term - integral_term)

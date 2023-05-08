@@ -13,8 +13,10 @@ else:
     torch.set_default_tensor_type('torch.FloatTensor')
 
 
-
 def parse_arguments():
+    """
+    Parse the command line arguments
+    """
     parser = ArgumentParser(description="Examples: \n",
                             formatter_class=RawTextHelpFormatter)
 
@@ -71,6 +73,7 @@ def parse_arguments():
     )
     return parser.parse_args()
 
+
 def train(dataset: Dataset, nodes_num: int, bins_num: int, dim: int, k, directed, 
           prior_lambda: float, lr: float, batch_size: int, epoch_num: int, steps_per_epoch: int, 
           device: torch.device, verbose: bool, seed: int, model_path: str, log_path: str):
@@ -78,14 +81,12 @@ def train(dataset: Dataset, nodes_num: int, bins_num: int, dim: int, k, directed
     # Define the learning model
     lm = LearningModel(
         nodes_num=nodes_num, directed=directed, bins_num=bins_num, dim=dim, k=k,
-        prior_lambda=prior_lambda, lr=lr, batch_size=batch_size, epoch_num=epoch_num, steps_per_epoch=steps_per_epoch,
-        device=device, verbose=verbose, seed=seed,
+        prior_lambda=prior_lambda, device=device, verbose=verbose, seed=seed,
     )
-    # Learn the hyperparameters
-    lm.learn(dataset=dataset)
+    # Learn the hyper-parameters
+    lm.learn(dataset=dataset, lr=lr, batch_size=batch_size, epoch_num=epoch_num, steps_per_epoch=steps_per_epoch)
     # Save the model
     lm.save(path=model_path)
-
 
 
 def process(parser):
@@ -115,7 +116,8 @@ def process(parser):
         for current_prior_lambda in [1e-6, 1e-4, 1e-2, 1e0, 1e2, 1e4, 1e6]:
             args['prior_lambda'] = current_prior_lambda
             train(dataset=dataset, nodes_num=nodes_num, **args) 
-        
+
+
 if __name__ == '__main__':
     parser = parse_arguments()
     process(parser)
