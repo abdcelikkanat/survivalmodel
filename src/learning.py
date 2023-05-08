@@ -95,7 +95,7 @@ class LearningModel(BaseModel, torch.nn.Module):
         self.__min_time = edge_times.min()
         self.__max_time = edge_times.max()
         edge_times = (edge_times - self.__min_time) / (self.__max_time - self.__min_time)
-        print(dataset.get_edges().shape)
+
         # Define the batch sampler
         bs = BatchSampler(
             edges=dataset.get_edges(), edge_times=edge_times, edge_states=dataset.get_states(),
