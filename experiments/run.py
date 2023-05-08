@@ -4,13 +4,13 @@ from src.dataset import Dataset
 from src.learning import LearningModel
 from argparse import ArgumentParser, RawTextHelpFormatter
 
-# Global control for device
-CUDA = False
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
-if (CUDA) and (device == "cuda:0"):
-    torch.set_default_tensor_type('torch.cuda.FloatTensor')
-else:
-    torch.set_default_tensor_type('torch.FloatTensor')
+# # Global control for device
+# CUDA = False
+# device = "cuda:0" if torch.cuda.is_available() else "cpu"
+# if (CUDA) and (device == "cuda:0"):
+#     torch.set_default_tensor_type('torch.cuda.FloatTensor')
+# else:
+#     torch.set_default_tensor_type('torch.FloatTensor')
 
 
 def parse_arguments():
@@ -63,7 +63,7 @@ def parse_arguments():
         '--lr', type=float, default=0.01, required=False, help='Learning rate'
     )
     parser.add_argument(
-        '--device', type=str, default="gpu", required=False, help='Device'
+        '--device', type=str, default="cuda", required=False, help='Device'
     )
     parser.add_argument(
         '--seed', type=int, default=19, required=False, help='Seed value to control the randomization'
