@@ -31,6 +31,9 @@ def parse_arguments():
         '--fps', type=int, required=False, default=12, help='Frame per second for the animation'
     )
     parser.add_argument(
+        '--axis_off', type=bool, required=False, default=True, help='Remove the axis of the animation'
+    )
+    parser.add_argument(
         '--padding', type=int, required=False, default=0, help='Padding for the animation'
     )
     parser.add_argument(
@@ -102,7 +105,7 @@ def process(parser):
     anim = Animation(
         rt_s=rt_s, rt_r=rt_r, frame_times=frame_times.detach().numpy(), data_dict=dataset.get_data_dict(),
         title=parser.title, font_size=parser.font_size, fig_size=parser.fig_size, fps=parser.fps,
-        padding=parser.padding,
+        axis_off=parser.axis_off, padding=parser.padding,
         edge_alpha=parser.edge_alpha, edge_width=parser.edge_width, edge_color=parser.edge_color,
         node_sizes=parser.node_sizes, node_colors=parser.node_color, color_palette=parser.color_palette
     )

@@ -252,7 +252,7 @@ class Dataset:
         # If states is None, construct the states tensor
         if self.__states is None:
             # Represent the edges in a flat index format
-            edge_flat_idx = utils.pairIdx2flatIdx(self.get_edges(0), self.get_edges(1), self.__nodes_num, self.__directed)
+            edge_flat_idx = utils.matIdx2flatIdx(self.get_edges(0), self.get_edges(1), self.__nodes_num, self.__directed)
             # Get the unique indices and their counts
             _, idx_counts = torch.unique(edge_flat_idx, sorted=True, return_counts=True)
             # Construct a mask

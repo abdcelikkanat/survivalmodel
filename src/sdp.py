@@ -1,20 +1,18 @@
 import torch
-import random
 import utils
 
 
 class SurviveDieProcess:
 
-    def __init__(self, lambda_func, initial_state: int, critical_points: torch.Tensor, seed: int = 19):
+    def __init__(self, lambda_func, initial_state: int, critical_points: list, seed: int = 19):
 
-        # Suppose that the first and the last value of the 'critical_points' correspond to initial and last time of the timeline
-
+        # It is supposed that the first and the last value of the 'critical_points'
+        # correspond to initial and last time of the timeline
         self.__lambda_func = lambda_func
         self.__initial_state = initial_state
         self.__critical_points = critical_points
 
         self.__init_time = self.__critical_points[0]
-        # assert len(self.__critical_points[0]) == len(self.__critical_points[1]), "FIX"
         self.__num_of_bins = len(self.__critical_points)
 
         # Find the max lambda values for each interval
@@ -38,11 +36,13 @@ class SurviveDieProcess:
         # Set seed
         utils.set_seed(seed=seed)
 
-    def simulate(self) -> list:
+    def simulate(self) -> tuple[list, list]:
+
         t, J, S, states = self.__init_time, 1, [], [self.__initial_state]
         # Step 2
         U = torch.rand(1)  # Random number
-        X = (-1.0 / (self.__lambda_max[states[-1], J] + utils.EPS)) * torch.log(U)  # Random variable from exponential dist.
+        # Random variable from exponential dist.
+        X = (-1.0 / (self.__lambda_max[states[-1], J] + utils.EPS)) * torch.log(U)
 
         while True:
             # Step 3
@@ -58,13 +58,14 @@ class SurviveDieProcess:
                     states.append(1 - states[-1])
                 # Step 7 -> Do step 2 then loop starts again at step 3
                 U = torch.rand(1)  # Random number
-                X = (-1./(self.__lambda_max[states[-1], J]+utils.EPS)) * torch.log(U)  # Random variable from exponential dist.
+                # Random variable from exponential dist.
+                X = (-1./(self.__lambda_max[states[-1], J]+utils.EPS)) * torch.log(U)
             else:
                 # Step 8
                 if J == self.__num_of_bins - 1:  # k +1 because of zero-indexing
                     break
                 # Step 9
-                X = (X-self.__critical_points[J] + t) * self.__lambda_max[states[-1], J]/self.__lambda_max[states[-1], J+1]
+                X = (X-self.__critical_points[J]+t)*self.__lambda_max[states[-1], J]/self.__lambda_max[states[-1], J+1]
                 t = self.__critical_points[J]
                 J += 1
 
