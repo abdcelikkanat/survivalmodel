@@ -124,11 +124,12 @@ class BatchSampler(torch.nn.Module):
         # Compute the expanded states
         border_cum_sum = border_marked_idx.cumsum(0) - 1
         border_cum_sum[is_edge == 1] -= 1
-        counts = torch.bincount(border_cum_sum.to(torch.long))
+        counts = torch.bincount(border_cum_sum.to(torch.long), minlength=len(batch_states)+len(batch_flat_idx_combin) )
         # print("cumsum:", border_cum_sum, len(border_cum_sum))
         # print("counts:", counts, counts.sum())
+        # print("len:", min(border_cum_sum), max(border_cum_sum), len(counts), len( border[2][border_marked_idx == 1] ))
         # print("last:", border[2][border_marked_idx == 1])
-        expanded_states = torch.repeat_interleave(border[2][border_marked_idx == 1][:-1], counts).to(torch.long)
+        expanded_states = torch.repeat_interleave(border[2][border_marked_idx == 1], counts).to(torch.long)
 
         # Compute the delta time
         delta_t = expanded_times[1:] - expanded_times[:-1]
