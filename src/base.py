@@ -391,8 +391,9 @@ class BaseModel(torch.nn.Module):
         :return: A vector of shape L
         '''
         beta_ij = self.get_beta_ij(pairs=edges, pair_states=edge_states)
-        intensity = beta_ij + (2*edge_states-1)*torch.norm(self.get_delta_rt(time_list=time_list, pairs=edges), p=2, dim=1, keepdim=False)**2 
-
+        intensity = beta_ij + edge_states * torch.norm(
+            self.get_delta_rt(time_list=time_list, pairs=edges), p=2, dim=1, keepdim=False
+        )**2
         return intensity
 
     def get_intensity_at(self, time_list: torch.Tensor, edges: torch.Tensor, edge_states: torch.Tensor) -> torch.Tensor:
@@ -436,10 +437,13 @@ class BaseModel(torch.nn.Module):
         term0 = 0.5 * torch.sqrt(torch.as_tensor(utils.PI, device=self.__device)) * inv_norm_delta_v
         term1 = torch.exp(beta_ij - (2*states-1)*(r**2 - norm_delta_r**2) )
 
-        term2_u = (1-states)*torch.erf(delta_t*norm_delta_v+r) + states*utils.erfi_approx(delta_t*norm_delta_v+r)
-        term2_l = (1-states)*torch.erf(r) + states*utils.erfi_approx(r)
+        term2_u = 0.5*(1-states)*torch.erf(delta_t*norm_delta_v+r) + 0.5*(states+1)*utils.erfi_approx(delta_t*norm_delta_v+r)
+        term2_l = 0.5*(1-states)*torch.erf(r) + 0.5*(states+1)*utils.erfi_approx(r)
 
-        return term0 * term1 * (term2_u - term2_l)
+        diff = term2_u - term2_l
+        diff[states == 0] = 2 * diff[states == 0]
+
+        return term0 * term1 * diff
 
     def get_nll(self, pairs: torch.Tensor, times: torch.FloatTensor, states: torch.LongTensor,
                 is_edge: torch.BoolTensor, delta_t: torch.FloatTensor) -> torch.Tensor:

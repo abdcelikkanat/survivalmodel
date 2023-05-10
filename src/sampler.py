@@ -115,7 +115,7 @@ class BatchSampler(torch.nn.Module):
         # Concatenate all the tensors
         border = torch.vstack((expanded_pair_idx, expanded_times, expanded_states, border_marked_idx, is_edge))
         # Firstly, sort with respect to the pair indices, then time and finally states.
-        border = border[:, border[2].argsort(stable=True)]
+        border = border[:, border[2].abs().argsort(stable=True)]
         border = border[:, border[1].argsort(stable=True)]
         border = border[:, border[0].argsort(stable=True)]
 
@@ -123,8 +123,12 @@ class BatchSampler(torch.nn.Module):
 
         # Compute the expanded states
         border_cum_sum = border_marked_idx.cumsum(0) - 1
+        border_cum_sum[is_edge == 1] -= 1
         counts = torch.bincount(border_cum_sum.to(torch.long))
-        expanded_states = torch.repeat_interleave(border[2][border_marked_idx == 1], counts).to(torch.long)
+        # print("cumsum:", border_cum_sum, len(border_cum_sum))
+        # print("counts:", counts, counts.sum())
+        # print("last:", border[2][border_marked_idx == 1])
+        expanded_states = torch.repeat_interleave(border[2][border_marked_idx == 1][:-1], counts).to(torch.long)
 
         # Compute the delta time
         delta_t = expanded_times[1:] - expanded_times[:-1]
@@ -136,7 +140,7 @@ class BatchSampler(torch.nn.Module):
         expanded_pairs = utils.flatIdx2matIdx(expanded_pair_idx, n=self.__nodes_num, is_directed=self.__directed)
 
         # If there is a zero time and if it is an edge, then make it non-edge
-        is_edge[expanded_times == 0] = 0
+        # is_edge[expanded_times == 0] = 0
 
         return batch_nodes, expanded_pairs, expanded_times, expanded_states, is_edge.to(torch.bool), delta_t
 
