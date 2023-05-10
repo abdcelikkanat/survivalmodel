@@ -435,15 +435,22 @@ class BaseModel(torch.nn.Module):
         r = delta_r_v * inv_norm_delta_v
 
         term0 = 0.5 * torch.sqrt(torch.as_tensor(utils.PI, device=self.__device)) * inv_norm_delta_v
-        term1 = torch.exp(beta_ij - (2*states-1)*(r**2 - norm_delta_r**2) )
+        # term1 = torch.exp(beta_ij - (2*states-1)*(r**2 - norm_delta_r**2) )
+        term1_plus = torch.exp(beta_ij - (r**2 - norm_delta_r**2))
+        term1_neg = torch.exp(beta_ij + (r**2 - norm_delta_r**2))
 
-        term2_u = 0.5*(1-states)*torch.erf(delta_t*norm_delta_v+r) + 0.5*(states+1)*utils.erfi_approx(delta_t*norm_delta_v+r)
-        term2_l = 0.5*(1-states)*torch.erf(r) + 0.5*(states+1)*utils.erfi_approx(r)
+        term2_u_plus = utils.erfi_approx(delta_t*norm_delta_v+r)
+        term2_u_neg = torch.erf(delta_t*norm_delta_v+r)
+        term2_l_plus = utils.erfi_approx(r)
+        term2_l_neg = torch.erf(r)
 
-        diff = term2_u - term2_l
-        diff[states == 0] = 2 * diff[states == 0]
+        output = term0 * (
+                0.5*(1+states)*term1_plus*(term2_u_plus - term2_l_plus) +
+                0.5*(1-states)*term1_neg*(term2_u_neg - term2_l_neg)
+        )
+        output[states == 0] = 2 * output[states == 0]
 
-        return term0 * term1 * diff
+        return output
 
     def get_nll(self, pairs: torch.Tensor, times: torch.FloatTensor, states: torch.LongTensor,
                 is_edge: torch.BoolTensor, delta_t: torch.FloatTensor) -> torch.Tensor:
