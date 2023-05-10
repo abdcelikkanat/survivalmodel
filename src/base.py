@@ -391,12 +391,10 @@ class BaseModel(torch.nn.Module):
         :return: A vector of shape L
         '''
         beta_ij = self.get_beta_ij(pairs=edges, pair_states=edge_states)
-        # intensity = beta_ij + edge_states * torch.norm(
-        #     self.get_delta_rt(time_list=time_list, pairs=edges), p=2, dim=1, keepdim=False
-        # )**2
-        intensity = beta_ij + (2*edge_states - 1) * torch.norm(
+        intensity = beta_ij + edge_states * torch.norm(
             self.get_delta_rt(time_list=time_list, pairs=edges), p=2, dim=1, keepdim=False
-        ) ** 2
+        )**2
+
         return intensity
 
     def get_intensity_at(self, time_list: torch.Tensor, edges: torch.Tensor, edge_states: torch.Tensor) -> torch.Tensor:
@@ -448,16 +446,16 @@ class BaseModel(torch.nn.Module):
         term2_u_neg = torch.erf(delta_t*norm_delta_v+r)
         term2_l_neg = torch.erf(r)
 
-        # output = term0 * (
-        #         0.5*(1+states)*term1_plus*(term2_u_plus - term2_l_plus) +
-        #         0.5*(1-states)*term1_neg*(term2_u_neg - term2_l_neg)
-        # )
-        # output[states == 0] = 2 * output[states == 0]
         output = term0 * (
-                (states) * term1_plus * (term2_u_plus - term2_l_plus) +
-                (1-states) * term1_neg * (term2_u_neg - term2_l_neg)
+                0.5*(1+states)*term1_plus*(term2_u_plus - term2_l_plus) +
+                0.5*(1-states)*term1_neg*(term2_u_neg - term2_l_neg)
         )
-        # output[states == 0] = 2 * output[states == 0]
+        output[states == 0] = 2 * output[states == 0]
+
+        # output = term0 * (
+        #         (states) * term1_plus * (term2_u_plus - term2_l_plus) +
+        #         (1-states) * term1_neg * (term2_u_neg - term2_l_neg)
+        # )
 
         return output
 
