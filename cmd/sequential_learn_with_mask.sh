@@ -40,11 +40,11 @@ do
 # Print Information
 echo "Dataset="${DATASET} "Lambda="${LAMBDA_LIST[${IDX}]}
 # Define model name
-MODELNAME="dec${IDX}_with_mask_${DATASET}_B=${BIN}_K=${K}_lambda=${LAMBDA_LIST[${IDX}]}_dim=${DIM}"
+MODELNAME="dec${IDX}_residual_${DATASET}_B=${BIN}_K=${K}_lambda=${LAMBDA_LIST[${IDX}]}_dim=${DIM}"
 MODELNAME="${MODELNAME}_epoch=${EPOCH}_spe=${SPE}_bs=${BATCH_SIZE}_lr=${LR}_seed=${SEED}"
 # Define input, output and log path
 INPUT_PATH=${INPUT_FOLDER}/${DATASET}/residual.edges
-MASK_PATH=${INPUT_FOLDER}/${DATASET}/residual.edges
+MASK_PATH=${INPUT_FOLDER}/${DATASET}/mask.edges
 MODEL_PATH=${MODEL_FOLDER}/${MODELNAME}.model
 LOG=${LOG_FOLDER}/${MODELNAME}.txt
 # Define the command
@@ -55,7 +55,7 @@ CMD="${CMD} --prior_lambda ${LAMBDA_LIST[${IDX}]} --epoch_num ${EPOCH} --lr ${LR
 if [ ${IDX} -gt 0 ]
 then
 let PREV_IDX=${IDX}-1
-PREV_MODELNAME="dec${PREV_IDX}_with_mask_${DATASET}_B=${BIN}_K=${K}_lambda=${LAMBDA_LIST[${PREV_IDX}]}_dim=${DIM}"
+PREV_MODELNAME="dec${PREV_IDX}_residual_${DATASET}_B=${BIN}_K=${K}_lambda=${LAMBDA_LIST[${PREV_IDX}]}_dim=${DIM}"
 PREV_MODELNAME="${PREV_MODELNAME}_epoch=${EPOCH}_spe=${SPE}_bs=${BATCH_SIZE}_lr=${LR}_seed=${SEED}"
 INIT_MODEL="${MODEL_FOLDER}/${PREV_MODELNAME}.model"
 CMD=${CMD}" --init_model ${INIT_MODEL}"

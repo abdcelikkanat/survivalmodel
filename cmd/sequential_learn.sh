@@ -40,7 +40,7 @@ do
 # Print Information
 echo "Dataset="${DATASET} "Lambda="${LAMBDA_LIST[${IDX}]}
 # Define model name
-MODELNAME="dec${IDX}_${DATASET}_B=${BIN}_K=${K}_lambda=${LAMBDA_LIST[${IDX}]}_dim=${DIM}"
+MODELNAME="dec${IDX}_train_${DATASET}_B=${BIN}_K=${K}_lambda=${LAMBDA_LIST[${IDX}]}_dim=${DIM}"
 MODELNAME="${MODELNAME}_epoch=${EPOCH}_spe=${SPE}_bs=${BATCH_SIZE}_lr=${LR}_seed=${SEED}"
 # Define input, output and log path
 INPUT_PATH=${INPUT_FOLDER}/${DATASET}/train.edges
