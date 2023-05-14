@@ -97,7 +97,7 @@ class LearningModel(BaseModel, torch.nn.Module):
         self.__masked_pair_indices = utils.matIdx2flatIdx(
             i=masked_dataset.get_edges(0), j=masked_dataset.get_edges(0), n=self.get_nodes_num(),
             is_directed=self.is_directed(), dtype=torch.long
-        ).unique() if masked_dataset is not None else None
+        ).unique().to(self.get_device()) if masked_dataset is not None else None
 
         # Scale the edge times to [0, 1]
         edge_times = dataset.get_times()
@@ -107,7 +107,8 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         # Define the batch sampler
         bs = BatchSampler(
-            edges=dataset.get_edges(), edge_times=edge_times, edge_states=dataset.get_states(),
+            edges=dataset.get_edges().to(self.get_device()), edge_times=edge_times.to(self.get_device()),
+            edge_states=dataset.get_states().to(self.get_device()),
             bin_bounds=self.get_bin_bounds(), nodes_num=self.get_nodes_num(), batch_size=self.__batch_size, 
             directed=self.is_directed(), device=self.get_device(), seed=self.get_seed()
         )
