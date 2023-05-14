@@ -140,14 +140,17 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         # Define the optimizers and parameter group names
         self.group_optimizers = []
-        self.param_groups = [["v"], ["v", "x0"], ["v", "x0", "prior"]]
+        #self.param_groups = [["v"], ["v", "x0"], ["v", "x0", "prior"]]
         # self.param_groups = [["x0"], ["v",], ["v", "prior"]]
         # self.param_groups = [["x0", "v", "prior"]]
         # self.param_groups = [["v"], ["v", "x0"], ]
-        self.group_epoch_weights = [1.0, 1.0, 1.0 ] #[1.0, 1.0, 1.0] #[1.0] #
+        #self.group_epoch_weights = [1.0, 1.0, 1.0 ] #[1.0, 1.0, 1.0] #[1.0] #
 
-        self.param_groups = [["v"], ["v", "x0"],]
-        self.group_epoch_weights = [1.0, 1.0]
+        #self.param_groups = [["v"], ["v", "x0"],]
+        #self.group_epoch_weights = [1.0, 1.0]
+        
+        self.param_groups = [["beta", "x0"], ["beta", "x0", "v"], ["beta", "x0", "v", "prior"] ]
+        self.group_epoch_weights = [1.0, 1.0, 1.0]
 
         # For each group of parameters, add a new optimizer
         for current_group in self.param_groups:
@@ -273,7 +276,7 @@ class LearningModel(BaseModel, torch.nn.Module):
         nll = self.get_nll(pairs=pairs, times=times, states=states, is_edge=is_edge, delta_t=delta_t)
 
         # Get the negative log-prior and the R-factor inverse
-        nlp = 0  #self.get_neg_log_prior(nodes=nodes, compute_R_factor_inv=compute_R_factor_inv)
+        nlp = self.get_neg_log_prior(nodes=nodes, compute_R_factor_inv=compute_R_factor_inv)
 
         return nll, nlp
 

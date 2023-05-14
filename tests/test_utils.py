@@ -9,7 +9,7 @@ class TestUtils(unittest.TestCase):
 
         n = 10
 
-        pairs = [(i, j) for i, j in utils.pair_iter(n, directed=False)]
+        pairs = [(i, j) for i, j in utils.pair_iter(n, is_directed=False)]
         ground_truth = [
             (0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (0, 6), (0, 7), (0, 8), (0, 9),
             (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9),
@@ -28,7 +28,7 @@ class TestUtils(unittest.TestCase):
 
         n = 10
 
-        pairs = [(i, j) for i, j in utils.pair_iter(n, directed=True)]
+        pairs = [(i, j) for i, j in utils.pair_iter(n, is_directed=True)]
         ground_truth = [
             (0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (0, 6), (0, 7), (0, 8), (0, 9),
             (1, 0), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9),
@@ -44,41 +44,49 @@ class TestUtils(unittest.TestCase):
 
         self.assertSequenceEqual(pairs, ground_truth)
 
-    def test_pairIdx2linearIdx_undirected(self):
+    def test_matIdx2flatIdx_undirected(self):
 
         n = 10
 
-        linearIdx = [utils.pairIdx2flatIdx(i=i, j=j, n=n, directed=False) for i, j in utils.pair_iter(n, directed=False)]
+        linearIdx = [utils.matIdx2flatIdx(
+            i=torch.as_tensor([i], dtype=torch.long),
+            j=torch.as_tensor([j], dtype=torch.long),
+            n=n, is_directed=False) for i, j in utils.pair_iter(n, is_directed=False)
+        ]
         ground_truth = list(range(n*(n-1)//2))
 
         self.assertSequenceEqual(linearIdx, ground_truth)
 
-    def test_linearIdx2pairIdx_undirected(self):
+    def test_flatIdx2matIdx_undirected(self):
 
         n = 10
 
-        pairIdx = list(map(tuple, utils.linearIdx2matIdx(idx=torch.arange(n*(n-1)//2), n=n, directed=False).tolist()))
-        ground_truth = list(map(tuple, utils.pair_iter(n, directed=False)))
+        matIdx = list(map(tuple, utils.flatIdx2matIdx(idx=torch.arange(n*(n-1)//2), n=n, is_directed=False).T.tolist()))
+        ground_truth = list(map(tuple, utils.pair_iter(n, is_directed=False)))
 
-        self.assertSequenceEqual(pairIdx, ground_truth)
+        self.assertSequenceEqual(matIdx, ground_truth)
 
-    def test_pairIdx2linearIdx_directed(self):
+    def test_matIdx2flatIdx_directed(self):
 
         n = 10
 
-        linearIdx = [utils.pairIdx2flatIdx(i=i, j=j, n=n, directed=True) for i, j in utils.pair_iter(n, directed=True)]
+        linearIdx = [utils.matIdx2flatIdx(
+            i=torch.as_tensor([i], dtype=torch.long), j=torch.as_tensor([j], dtype=torch.long),
+            n=n, is_directed=True) for i, j in utils.pair_iter(n, is_directed=True)
+        ]
         ground_truth = list(range(n*(n-1)))
 
         self.assertSequenceEqual(linearIdx, ground_truth)
     
-    def test_linearIdx2pairIdx_directed(self):
+    def test_flatIdx2matIdx_directed(self):
 
         n = 10
 
-        pairIdx = list(map(tuple, utils.linearIdx2matIdx(idx=torch.arange(n*(n-1)), n=n, directed=True).tolist()))
-        ground_truth = list(map(tuple, utils.pair_iter(n, directed=True)))
+        pairIdx = list(map(tuple, utils.flatIdx2matIdx(idx=torch.arange(n*(n-1)), n=n, is_directed=True).T.tolist()))
+        ground_truth = list(map(tuple, utils.pair_iter(n, is_directed=True)))
 
         self.assertSequenceEqual(pairIdx, ground_truth)
+
 
 if __name__ == '__main__':
     unittest.main()

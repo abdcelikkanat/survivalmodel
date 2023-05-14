@@ -519,19 +519,21 @@ class BaseModel(torch.nn.Module):
 
         # B x B matrix
         B_factor_s = prior.get_B_factor(
-            bin_centers1=middle_bounds, bin_centers2=middle_bounds, prior_B_x0_c=self.get_prior_B_x0_c_s(), prior_B_ls=self.get_prior_B_ls_s()
+            bin_centers1=middle_bounds, bin_centers2=middle_bounds, prior_B_x0_c=self.get_prior_B_x0_c_s(),
+            prior_B_ls=self.get_prior_B_ls_s(), device=self.__device
         )
         # N x K matrix where K is the community size
         C_factor_s = prior.get_C_factor(prior_C_Q=self.get_prior_C_Q_s())
         # D x D matrix
-        D_factor_s = prior.get_D_factor(dim=self.get_dim())
+        D_factor_s = prior.get_D_factor(dim=self.get_dim(), device=self.__device)
 
         if self.is_directed():
             B_factor_r = prior.get_B_factor(
-            bin_centers1=middle_bounds, bin_centers2=middle_bounds, prior_B_x0_c=self.get_prior_B_x0_c_r(), prior_B_ls=self.get_prior_B_ls_r()
+                bin_centers1=middle_bounds, bin_centers2=middle_bounds, prior_B_x0_c=self.get_prior_B_x0_c_r(),
+                prior_B_ls=self.get_prior_B_ls_r(), device=self.__device
             )
             C_factor_r = prior.get_C_factor(prior_C_Q=self.get_prior_C_Q_r())
-            D_factor_r = prior.get_D_factor(dim=self.get_dim())
+            D_factor_r = prior.get_D_factor(dim=self.get_dim(), device=self.__device)
 
         # Compute the Kf factor
         Kf_s = torch.kron(B_factor_s.contiguous(), torch.kron(torch.index_select(C_factor_s, dim=0, index=nodes), D_factor_s))
@@ -544,7 +546,7 @@ class BaseModel(torch.nn.Module):
             # R is the capacitance matrix defined by I + Kf.T @ inv(D) @ Kf
             R_factor_s = prior.get_R_factor(
                 dim=self.get_prior_k() * (self.get_bins_num()+1) * self.get_dim(), sigma=self.get_prior_sigma_s(), 
-                B_factor=B_factor_s, C_factor=C_factor_s, D_factor=D_factor_s
+                B_factor=B_factor_s, C_factor=C_factor_s, D_factor=D_factor_s, device=self.__device
             )
             R_factor_inv_s = torch.inverse(R_factor_s)
             self.set_prior_R_factor_inv_s(R_factor_inv_s)
@@ -552,7 +554,7 @@ class BaseModel(torch.nn.Module):
             if self.is_directed():
                 R_factor_r = prior.get_R_factor(
                     dim=self.get_prior_k() * (self.get_bins_num()+1) * self.get_dim(), sigma=self.get_prior_sigma_r(), 
-                    B_factor=B_factor_r, C_factor=C_factor_r, D_factor=D_factor_r
+                    B_factor=B_factor_r, C_factor=C_factor_r, D_factor=D_factor_r, device=self.__device
                 )
                 R_factor_inv_r = torch.inverse(R_factor_r)
                 self.set_prior_R_factor_inv_r(R_factor_inv_r)

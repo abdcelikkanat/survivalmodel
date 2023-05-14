@@ -36,7 +36,7 @@ def parse_arguments():
         '--k', type=int, default=10, required=False, help='Latent dimension size of the prior element'
     )
     parser.add_argument(
-        '--prior_lambda', type=float, default=None, required=False, help='Scaling coefficient of the covariance'
+        '--prior_lambda', type=float, default=1e6, required=False, help='Scaling coefficient of the covariance'
     )
     parser.add_argument(
         '--epoch_num', type=int, default=100, required=False, help='Number of epochs'
@@ -101,7 +101,7 @@ def process(parser):
         # Load the model if exists
         kwargs, lm_state = torch.load(parser.init_model, map_location=torch.device(parser.device))
         # Update the arguments
-        kwargs['seed'], kwargs['device'], kwargs['verbose']   = parser.seed, parser.device, parser.verbose
+        kwargs['seed'], kwargs['device'], kwargs['verbose'] = parser.seed, parser.device, parser.verbose
 
         # Load the model
         lm = LearningModel(**kwargs)
