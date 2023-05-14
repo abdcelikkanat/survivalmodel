@@ -16,12 +16,11 @@ do
 
 INPUT_FILE=${BASEFOLDER}/datasets/real/${DATASET}/${DATASET}.edges
 OUTPUT_FOLDER=${BASEFOLDER}/experiments/samples/mr=${MASK_RATIO}_cr=${COMPLETION_RATIO}_pr=${PRED_RATIO}/${DATASET}/
-LOG_FILE=${OUTPUT}/log.txt
 
 CMD="${PYTHON} ${SCRIPT}"
 CMD="${CMD} --edges ${INPUT_FILE} --output_folder ${OUTPUT_FOLDER}"
 CMD="${CMD} --pr ${PRED_RATIO} --cr ${COMPLETION_RATIO} --mr ${MASK_RATIO}"
-CMD="${CMD} --seed ${SEED} --log_file ${LOG_FILE}"
+CMD="${CMD} --seed ${SEED}"
 ${CMD}
 
 done
