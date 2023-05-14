@@ -102,7 +102,7 @@ class Animation:
                 sc_r.set_offsets(self._rt_r[frame_idx, :, :])
 
             # Plot the edges if the dataset is given
-            if self._data_dict is not None:
+            if self._data_dict is not None and self._edge_width > 0 and self._edge_alpha > 0:
 
                 for i in self._data_dict.keys():
                     for j in self._data_dict[i].keys():

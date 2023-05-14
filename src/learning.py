@@ -9,7 +9,7 @@ from src.sampler import BatchSampler
 
 class LearningModel(BaseModel, torch.nn.Module):
 
-    def __init__(self, nodes_num: int, directed: bool, bins_num: int, dim: int,
+    def __init__(self, nodes_num: int, directed: bool, signed: bool, bins_num: int, dim: int,
                  prior_lambda: float = 1e5, k=10,
                  device: torch.device = 'cpu', verbose: bool = False, seed: int = 19):
 
@@ -33,6 +33,7 @@ class LearningModel(BaseModel, torch.nn.Module):
             prior_C_Q_r=torch.nn.Parameter(2. * torch.rand(size=(nodes_num, k), device=device) - 1,  requires_grad=False)  if directed else None,
             prior_R_factor_inv_s = None, prior_R_factor_inv_r = None,
             directed=directed,
+            signed=signed,
             device=device,
             verbose=verbose,
             seed=seed
@@ -41,7 +42,9 @@ class LearningModel(BaseModel, torch.nn.Module):
         # Learning parameters
         self.__lp = "sequential"  # Learning procedure
         self.__optimizer = torch.optim.Adam  # Optimizer
+
         # - The following parameters are set in the learn() method
+        self.__masked_pair_indices = None
         self.__min_time = None
         self.__max_time = None
         self.__lr = None  # Learning rate
@@ -82,13 +85,19 @@ class LearningModel(BaseModel, torch.nn.Module):
                     param.requires_grad = prior_grad
 
     def learn(self, dataset, lr: float = 0.1, batch_size: int = 0, epoch_num: int = 100, steps_per_epoch=1,
-              loss_file_path=None):
+              masked_dataset=None, loss_file_path=None):
 
         # Set the learning parameters
         self.__lr = lr
         self.__batch_size = self.get_nodes_num() if batch_size == 0 else batch_size
         self.__epoch_num = epoch_num
         self.__steps_per_epoch = steps_per_epoch
+
+        # Select the masked pairs
+        self.__masked_pair_indices = utils.matIdx2flatIdx(
+            i=masked_dataset.get_edges(0), j=masked_dataset.get_edges(0), n=self.get_nodes_num(),
+            is_directed=self.is_directed(), dtype=torch.long
+        ).unique() if masked_dataset is not None else None
 
         # Scale the edge times to [0, 1]
         edge_times = dataset.get_times()
@@ -126,7 +135,7 @@ class LearningModel(BaseModel, torch.nn.Module):
     def __sequential_learning(self, bs: BatchSampler):
 
         if self.get_verbose():
-            print("- Training started (Procedure: Sequential Learning).")
+            print("+ Training started (Procedure: Sequential Learning).")
 
         # Define the optimizers and parameter group names
         self.group_optimizers = []
@@ -209,12 +218,12 @@ class LearningModel(BaseModel, torch.nn.Module):
         avg_loss = total_batch_loss / float(self.__steps_per_epoch)
 
         if not math.isfinite(avg_loss):
-            print(f"- Epoch loss is {avg_loss}, stopping training")
+            print(f"\t- Epoch loss is {avg_loss}, stopping training")
             sys.exit(1)
 
         if self.get_verbose() and (epoch_num % 10 == 0 or epoch_num == self.__epoch_num - 1):
             time_diff = time.time() - init_time
-            print("\t+ Epoch = {} | Avg. Loss/train: {} | Elapsed time: {:.2f}".format(epoch_num, avg_loss, time_diff))
+            print("\t- Epoch = {} | Avg. Loss/train: {} | Elapsed time: {:.2f}".format(epoch_num, avg_loss, time_diff))
 
         return epoch_loss, epoch_nll
 
@@ -224,6 +233,18 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         # Sample a batch
         batch_nodes, expanded_pairs, expanded_times, expanded_states, is_edge, delta_t = bs.sample()
+
+        if self.__masked_pair_indices is not None:
+
+            selected_indices = (utils.matIdx2flatIdx(
+                i=expanded_pairs[0], j=expanded_pairs[1], n=self.get_nodes_num(), is_directed=self.__batch_size
+            ).unsqueeze(1) == self.__masked_pair_indices).any(1) == False
+
+            expanded_pairs = expanded_pairs[:, selected_indices]
+            expanded_times = expanded_times[selected_indices]
+            expanded_states = expanded_states[selected_indices]
+            is_edge = is_edge[selected_indices]
+            delta_t = delta_t[selected_indices]
 
         # Compute the R factor inverse if the batch number is 0
         compute_R_factor_inv = True if batch_num == 0 else False
@@ -258,31 +279,23 @@ class LearningModel(BaseModel, torch.nn.Module):
     def save(self, path):
 
         if self.get_verbose():
-            print(f"- Model file is saving.")
-            print(f"\t+ Target path: {path}")
+            print(f"+ Model file is saving.")
+            print(f"\t- Target path: {path}")
 
         kwargs = {
             'nodes_num': self.get_nodes_num(),
             'directed': self.is_directed(),
+            'signed': self.is_signed(),
             'bins_num': self.get_bins_num(),
             'dim': self.get_dim(),
             'prior_lambda': self.get_prior_lambda(), 
             'k': self.get_prior_k(),
-            # 'lr': self.__lr,
-            # 'batch_size':  self.__batch_size,
-            # 'epoch_num': self.__epoch_num,
-            # 'steps_per_epoch': self.__steps_per_epoch,
             'verbose': self.get_verbose(), 
             'seed': self.get_seed()
         }
-
-        # # Scale the parameters
-        # self.state_dict()['_BaseModel__v_s'].mul_( 1. / (self.__max_time - self.__min_time) )
-        # if self.is_directed():
-        #     self.state_dict()['_BaseModel__v_r'].mul_( 1. / (self.__max_time - self.__min_time) )
         
         torch.save([kwargs, self.state_dict()], path)
 
         if self.get_verbose():
-            print(f"\t+ Completed.")
+            print(f"\t- Completed.")
 

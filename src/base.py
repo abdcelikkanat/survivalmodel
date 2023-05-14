@@ -7,7 +7,7 @@ class BaseModel(torch.nn.Module):
     Description
     '''
     def __init__(self, x0_s: torch.Tensor, v_s: torch.Tensor, beta_s: torch.Tensor, 
-                directed = True, prior_lambda: float = 1.0, 
+                directed: bool = False, signed: bool = False, prior_lambda: float = 1.0,
                 prior_sigma_s: float = 1.0, prior_B_x0_logit_c_s: float = 1.0, 
                 prior_B_ls_s: float = 1.0, prior_C_Q_s: torch.Tensor = None, prior_R_factor_inv_s: torch.Tensor = None, 
                 x0_r: torch.Tensor = None, v_r: torch.Tensor = None, beta_r: torch.Tensor = None, 
@@ -29,9 +29,10 @@ class BaseModel(torch.nn.Module):
         self.__beta_s = beta_s
         self.__beta_r = beta_r
 
-        # Set the number of bins and directed variable
+        # Set the number of bins, directed and signed
         self.__bins_num = self.__v_s.shape[0]
         self.__directed = directed
+        self.__signed = signed
         # Set the number of nodes, dimension size and bin width
         self.__nodes_num = self.__x0_s.shape[0]
         self.__dim = self.__x0_s.shape[1]
@@ -56,14 +57,32 @@ class BaseModel(torch.nn.Module):
         # Set the seed value for reproducibility
         utils.set_seed(self.__seed)
 
+        if self.__verbose:
+            print(f"+ Model parameters")
+            print(f"\t- The number of nodes: {self.get_nodes_num()}")
+            print(f"\t- The dimension size: {self.get_dim()}")
+            print(f"\t- The number of bins: {self.get_bins_num()}")
+            print(f"\t- The directed graph: {self.is_directed()}")
+            print(f"\t- The signed graph: {self.is_signed()}")
+            print(f"\t- The device: {self.get_device()}")
+            print(f"\t- The prior lambda: {self.get_prior_lambda()}")
+            print(f"\t- Seed: {self.__seed}")
+
     def is_directed(self):
-        '''
+        """
         Returns if the graph is directed or not
 
         :return
-        '''
+        """
 
         return self.__directed
+
+    def is_signed(self):
+        """
+        Returns if the graph is signed or not
+        """
+
+        return self.__signed
 
     def get_x0_s(self, standardize=True):
         '''
@@ -382,18 +401,26 @@ class BaseModel(torch.nn.Module):
         return delta_rt
 
     def get_log_intensity_at(self, time_list: torch.Tensor, edges: torch.Tensor, edge_states: torch.Tensor) -> torch.Tensor:
-        '''
+        """
         Computes the log of the intenstiy function for given times and pairs
 
         :param time_list: a vector of shape L
         :param pairs: a vector of shape 2 x L
         :param states: a vector of shape L
         :return: A vector of shape L
-        '''
+        """
+
         beta_ij = self.get_beta_ij(pairs=edges, pair_states=edge_states)
-        intensity = beta_ij + edge_states * torch.norm(
-            self.get_delta_rt(time_list=time_list, pairs=edges), p=2, dim=1, keepdim=False
-        )**2
+
+        if self.is_signed():
+            intensity = beta_ij + edge_states * torch.norm(
+                self.get_delta_rt(time_list=time_list, pairs=edges), p=2, dim=1, keepdim=False
+            )**2
+
+        else:
+            intensity = beta_ij + (2.*edge_states-1.) * torch.norm(
+                self.get_delta_rt(time_list=time_list, pairs=edges), p=2, dim=1, keepdim=False
+            ) ** 2
 
         return intensity
 
@@ -446,16 +473,16 @@ class BaseModel(torch.nn.Module):
         term2_u_neg = torch.erf(delta_t*norm_delta_v+r)
         term2_l_neg = torch.erf(r)
 
-        output = term0 * (
-                0.5*(1+states)*term1_plus*(term2_u_plus - term2_l_plus) +
-                0.5*(1-states)*term1_neg*(term2_u_neg - term2_l_neg)
-        )
-        output[states == 0] = 2 * output[states == 0]
-
-        # output = term0 * (
-        #         (states) * term1_plus * (term2_u_plus - term2_l_plus) +
-        #         (1-states) * term1_neg * (term2_u_neg - term2_l_neg)
-        # )
+        if self.is_signed():
+            output = term0 * (
+                    (1 - (states.absolute() - states)/2)*term1_plus*(term2_u_plus - term2_l_plus) +
+                    (1 - (states.absolute() + states)/2)*term1_neg*(term2_u_neg - term2_l_neg)
+            )
+        else:
+            output = term0 * (
+                    states * term1_plus * (term2_u_plus - term2_l_plus) +
+                    (1-states) * term1_neg * (term2_u_neg - term2_l_neg)
+            )
 
         return output
 

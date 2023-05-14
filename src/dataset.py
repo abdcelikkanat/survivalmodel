@@ -6,14 +6,15 @@ import torch
 
 class Dataset:
 
-    def __init__(self, nodes_num = 0, edges: torch.LongTensor = None, edge_times: torch.FloatTensor = None, 
-                edge_states: torch.FloatTensor = None, directed:bool=None, verbose=False):
+    def __init__(self, nodes_num = 0, edges: torch.LongTensor = None, edge_times: torch.Tensor = None,
+                edge_states: torch.Tensor = None, directed: bool = None, signed: bool = None, verbose=False):
 
         self.__nodes_num = nodes_num
         self.__edges = edges
         self.__times = edge_times
         self.__states = edge_states
         self.__directed = directed
+        self.__signed = signed
         self.__verbose = verbose
 
         # If the edge times are given, find the initial and last time
@@ -35,7 +36,7 @@ class Dataset:
         '''
         
         edges, edge_times, edge_states = [], [], []
-        self.__directed = False
+        self.__directed, self.__signed = False, False
         with open(file_path, 'r') as f:
             for line in f.readlines():
                 # Discard the lines starting with #
@@ -72,6 +73,9 @@ class Dataset:
                     # Add the state if given
                     if len(tokens) > 3:
                         edge_states.append( int(tokens[3]) )
+
+                        if int(tokens[3]) < 0:
+                            self.__signed = True
 
         # Split the columns
         self.__edges = torch.as_tensor(edges, dtype=torch.long).T
@@ -307,13 +311,28 @@ class Dataset:
 
         return self.__nodes_num - len(nonisolated_nodes)
 
-    def print_info(self):
-        '''
-        Print the dataset info
-        '''
+    def is_directed(self):
+        """
+        Check if the graph is directed
+        """
 
-        print(f"Number of nodes: {self.__nodes_num}")
-        print(f"Number of edges: {self.__edges.shape[1]}")
-        print(f"Is directed: {self.__directed}")
-        print(f"Initial time: {self.__init_time}")
-        print(f"Last time: {self.__last_time}")
+        return self.__directed
+
+    def is_signed(self):
+        """
+        Check if the graph is signed
+        """
+
+        return self.__signed
+
+    def print_info(self):
+        """
+        Print the dataset info
+        """
+        print(f"+ Dataset information")
+        print(f"\t- Number of nodes: {self.__nodes_num}")
+        print(f"\t- Number of edges: {self.__edges.shape[1]}")
+        print(f"\t- Is directed: {self.__directed}")
+        print(f"\t- Is signed: {self.__signed}")
+        print(f"\t- Initial time: {self.__init_time}")
+        print(f"\t- Last time: {self.__last_time}")

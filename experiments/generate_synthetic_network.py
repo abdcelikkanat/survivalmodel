@@ -7,16 +7,26 @@ from src.animation import Animation
 #  Sample the intial position and velocity vectors
 args = {
     'cluster_sizes': [5]*10, 'bins_num': 100, 'dim': 2, 'directed': False,   #[5]*4
-    'beta_s':-0.1, 'beta_r': 0.,
-    'prior_lambda': 1.0, #1.75e0 # Expand the space
-    'prior_sigma_s': 1e-1,'prior_sigma_r': 8e-2,  #1e-1 #1e-2, 
-    'prior_B_x0_logit_c_s': 1.5, 'prior_B_x0_logit_c_r': 1e+0, #(1e0, 1e+0)
+    'beta_s':+0.5, 'beta_r': 0.,
+    'prior_lambda': 1.5, #1.75e0 # Expand the space
+    'prior_sigma_s': 1e-1,'prior_sigma_r': 8e-2,  #1e-1 #1e-2,
+    'prior_B_x0_logit_c_s': 1e6, 'prior_B_x0_logit_c_r': 1e+0, #(1e0, 1e+0)
     'prior_B_ls_s': 1e-1, 'prior_B_ls_r': 5e-1, #(1e-3, 1e-3) # controls how crazy the nodes are, craziness ~ 1./value
-    'device': "cpu", 'verbose': True, 'seed': 1,
+    'device': "cpu", 'verbose': True, 'seed': 18,
 }
+# #  Sample the intial position and velocity vectors
+# args = {
+#     'cluster_sizes': [5]*10, 'bins_num': 100, 'dim': 2, 'directed': False,   #[5]*4
+#     'beta_s':+0.1, 'beta_r': 0.,
+#     'prior_lambda': 1.0, #1.75e0 # Expand the space
+#     'prior_sigma_s': 1e-1,'prior_sigma_r': 8e-2,  #1e-1 #1e-2,
+#     'prior_B_x0_logit_c_s': 1.5, 'prior_B_x0_logit_c_r': 1e+0, #(1e0, 1e+0)
+#     'prior_B_ls_s': 1e-1, 'prior_B_ls_r': 5e-1, #(1e-3, 1e-3) # controls how crazy the nodes are, craziness ~ 1./value
+#     'device': "cpu", 'verbose': True, 'seed': 20,
+# }
 
 # Define the dataset name
-dataset_name = f"synthetic_april21_{'directed' if args['directed'] else 'undirected'}"
+dataset_name = f"synthetic_may_{'directed' if args['directed'] else 'undirected'}"
 
 # Define the dataset folder path
 dataset_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'datasets', dataset_name)
@@ -51,25 +61,22 @@ nodes=torch.arange(nodes_num).unsqueeze(1).expand(nodes_num, number_of_frames)
 time_list = frame_times.unsqueeze(0).expand(nodes_num, number_of_frames)
 
 # Get the node representations for a given time list
-rt_s = bm.get_rt_s(time_list=(time_list.flatten() - init_time)/(last_time - init_time), nodes=nodes.flatten())
-rt_s = rt_s.reshape(nodes_num, number_of_frames, args['dim']).transpose(0, 1).detach().numpy()
+rt_s = bm.get_rt_s(
+    time_list=(time_list.flatten() - init_time)/(last_time - init_time), nodes=nodes.flatten()
+).reshape(nodes_num, number_of_frames, args['dim']).transpose(0, 1) #.detach().numpy()
 if args['directed']:
-    rt_r = bm.get_rt_r(time_list=(time_list.flatten() - init_time)/(last_time - init_time), nodes=nodes.flatten()) 
-    rt_r = rt_r.reshape(nodes_num, number_of_frames, args['dim']).transpose(0, 1).detach().numpy()
+    rt_r = bm.get_rt_r(
+        time_list=(time_list.flatten() - init_time)/(last_time - init_time), nodes=nodes.flatten()
+    ).reshape(nodes_num, number_of_frames, args['dim']).transpose(0, 1) #.detach().numpy()
 else:
     rt_r = None
 
 dataset = Dataset()
-dataset.read_edgelist( os.path.join(dataset_folder, f"{dataset_name}.edges") )
+dataset.read_edgelist(os.path.join(dataset_folder, f"{dataset_name}.edges"))
 
 anim = Animation(
-    embs=(rt_s, rt_r),
-    # data=(data[0], data[1]), 
-    dataset=dataset,
-    frame_times=frame_times.detach().numpy(),
-    directed=args['directed'],
-    fps=12,
-    node2color={node:node for node in range(nodes_num)},
+    rt_s=rt_s, rt_r=rt_r, frame_times=frame_times, axis_off=False,
+    data_dict=dataset.get_data_dict(),
 )
 anim.save(anim_path, format="mp4")
 

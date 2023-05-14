@@ -60,6 +60,9 @@ def parse_arguments():
     parser.add_argument(
         '--format', type=str, required=False, choices=["mp4", "gif"], default="mp4", help='Animation file format'
     )
+    parser.add_argument(
+        '--verbose', type=bool, default=1, required=False, help='Verbose'
+    )
     return parser.parse_args()
 
 
@@ -79,10 +82,14 @@ def process(parser):
     kwargs, lm_state = torch.load(model_path, map_location=torch.device("cpu"))
     lm = LearningModel(**kwargs, device=torch.device("cpu"))
     lm.load_state_dict(lm_state)
+    # Update the model parameters
+    kwargs['device'] = torch.device("cpu")
+    kwargs['verbose'] = parser.verbose
 
     # Get the dimension size and directed flag
     dim = kwargs['dim']
     directed = kwargs['directed']
+    signed = kwargs['signed']
 
     init_time = dataset.get_init_time()
     last_time = dataset.get_last_time()

@@ -45,7 +45,7 @@ class BatchSampler(torch.nn.Module):
 
         # Construct the sparse state matrix
         # - It must be of float type due to the torch issues
-        self.__edge_states_mat =  torch.sparse_coo_tensor(
+        self.__edge_states_mat = torch.sparse_coo_tensor(
             indices=torch.vstack((self.__edges_flat_idx, edge_mat_indices)), 
             values=self.__edge_states.to(torch.float),
             size=(self.__pairs_num, max_edge_count_per_pair), device=self.__device
@@ -125,10 +125,6 @@ class BatchSampler(torch.nn.Module):
         border_cum_sum = border_marked_idx.cumsum(0) - 1
         border_cum_sum[is_edge == 1] -= 1
         counts = torch.bincount(border_cum_sum.to(torch.long), minlength=len(batch_states)+len(batch_flat_idx_combin) )
-        # print("cumsum:", border_cum_sum, len(border_cum_sum))
-        # print("counts:", counts, counts.sum())
-        # print("len:", min(border_cum_sum), max(border_cum_sum), len(counts), len( border[2][border_marked_idx == 1] ))
-        # print("last:", border[2][border_marked_idx == 1])
         expanded_states = torch.repeat_interleave(border[2][border_marked_idx == 1], counts).to(torch.long)
 
         # Compute the delta time
