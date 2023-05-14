@@ -81,7 +81,7 @@ split_ratio = 1.0 - prediction_ratio
 
 # Get the minimum and maximum time values
 min_time, max_time = dataset.get_init_time(), dataset.get_last_time()
-split_time = min_time + split_ratio * (max_time - min_time)
+split_time = int(min_time + split_ratio * (max_time - min_time))
 
 
 train_pairs, train_times, train_states = [], [], []
