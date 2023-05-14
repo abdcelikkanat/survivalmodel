@@ -192,7 +192,7 @@ train_dataset = Dataset(
     edge_times=torch.as_tensor([t for pair_times in train_times for t in pair_times], dtype=torch.long),
     edge_states=torch.as_tensor([s for pair_states in train_states for s in pair_states], dtype=torch.long),
 )
-min_time, max_time = train_dataset.get_init_time(), train_dataset.get_last_time()
+min_time, max_time = int(train_dataset.get_init_time()), int(train_dataset.get_last_time())
 ########################################################################################################################
 
 if verbose:
