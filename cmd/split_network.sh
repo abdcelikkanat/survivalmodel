@@ -9,7 +9,7 @@ SEED=19
 DATASETS=( high-school )
 COMPLETION_RATIO=0.1
 MASK_RATIO=0.2
-PRED_RATIO=0.1
+PRED_RATIO=0.0
 ########################################################################################################################
 for DATASET in ${DATASETS[@]}
 do
