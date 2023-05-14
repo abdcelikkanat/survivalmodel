@@ -251,6 +251,7 @@ class Dataset:
     def get_states(self) -> torch.Tensor:
         """
         Get the states
+        NOTE: It is assumed that the network is binary, not signed
         """
 
         # If states is None, construct the states tensor
@@ -262,7 +263,7 @@ class Dataset:
             # Construct a mask
             mask = torch.arange(max(idx_counts)).expand(len(idx_counts), -1) < idx_counts.unsqueeze(1)
             # Construct a tensor consisting of consecutive 0s and 1s
-            zero_one_tensor = torch.zeros(max(idx_counts))
+            zero_one_tensor = torch.zeros(max(idx_counts), dtype=torch.long)
             zero_one_tensor[torch.arange(max(idx_counts)) % 2 == 0] = 1
             # Construct the states tensor which is in the ordered  format
             ordered_states = zero_one_tensor.expand(len(idx_counts), -1)[mask]
