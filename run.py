@@ -61,6 +61,7 @@ def parse_arguments():
     )
     return parser.parse_args()
 
+
 def process(parser):
 
     # Load the dataset
@@ -109,7 +110,8 @@ def process(parser):
     # Learn the hyper-parameters
     lm.learn(
         dataset=dataset, masked_dataset=masked_dataset,
-        lr=parser.lr, batch_size=parser.batch_size, epoch_num=parser.epoch_num, steps_per_epoch=parser.spe
+        lr=parser.lr, batch_size=parser.batch_size, epoch_num=parser.epoch_num, steps_per_epoch=parser.spe,
+        log_path=parser.log_path
     )
     # Save the model
     lm.save(path=parser.model_path)

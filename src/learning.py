@@ -85,7 +85,7 @@ class LearningModel(BaseModel, torch.nn.Module):
                     param.requires_grad = prior_grad
 
     def learn(self, dataset, lr: float = 0.1, batch_size: int = 0, epoch_num: int = 100, steps_per_epoch=1,
-              masked_dataset=None, loss_file_path=None):
+              masked_dataset=None, log_file_path=None):
 
         # Set the learning parameters
         self.__lr = lr
@@ -123,9 +123,9 @@ class LearningModel(BaseModel, torch.nn.Module):
             raise Exception(f"Unknown learning procedure: {self.__lp}")
 
         # Save the loss if the loss file path was given
-        if loss_file_path is not None:
+        if log_file_path is not None:
             
-            with open(loss_file_path, 'w') as f:
+            with open(log_file_path, 'w') as f:
                 for batch_losses, nll_losses in zip(loss, nll):
                     f.write(f"Loss: {' '.join('{:.3f}'.format(loss) for loss in batch_losses)}\n")
                     f.write(f"Nll: {' '.join('{:.3f}'.format(loss) for loss in nll_losses)}\n")

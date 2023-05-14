@@ -8,7 +8,7 @@ module load cuda/10.2
 BASEFOLDER="/work3/abce/survival"
 PYTHON="/appl/python/3.11.0/bin/python3"
 export PYTHONPATH="${PYTHONPATH}:/${BASEFOLDER}"
-SCRIPT="${BASEFOLDER}/experiments/run.py"
+SCRIPT="${BASEFOLDER}/run.py"
 ########################################################################################################################
 DATASETS=( high-school )
 MASK_RATIO=0.2
@@ -43,12 +43,12 @@ echo "Dataset="${DATASET} "Lambda="${LAMBDA_LIST[${IDX}]}
 MODELNAME="dec${IDX}_${DATASET}_B=${BIN}_K=${K}_lambda=${LAMBDA_LIST[${IDX}]}_dim=${DIM}"
 MODELNAME="${MODELNAME}_epoch=${EPOCH}_spe=${SPE}_bs=${BATCH_SIZE}_lr=${LR}_seed=${SEED}"
 # Define input, output and log path
-INPUT_PATH=${INPUT_FOLDER}/${DATASET}/residual.edges
+INPUT_PATH=${INPUT_FOLDER}/${DATASET}/train.edges
 MODEL_PATH=${MODEL_FOLDER}/${MODELNAME}.model
 LOG=${LOG_FOLDER}/${MODELNAME}.txt
 # Define the command
-CMD="${PYTHON} ${SCRIPT} --edges ${INPUT_PATH} --model_path ${MODEL_PATH} --mask_path ${INPUT}/mask/pairs.pkl"
-CMD="${CMD} --log ${LOG} --dim ${DIM} --last_time ${LASTTIME} --bins_num ${BIN} --k ${K} --batch_size ${BATCH_SIZE}"
+CMD="${PYTHON} ${SCRIPT} --edges ${INPUT_PATH} --model_path ${MODEL_PATH}"
+CMD="${CMD} --log ${LOG} --dim ${DIM} --bins_num ${BIN} --k ${K} --batch_size ${BATCH_SIZE}"
 CMD="${CMD} --prior_lambda ${LAMBDA_LIST[${IDX}]} --epoch_num ${EPOCH} --lr ${LR} --seed ${SEED} --spe ${SPE} --verbose 1"
 
 if [ ${IDX} -gt 0 ]
