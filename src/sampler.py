@@ -32,7 +32,7 @@ class BatchSampler(torch.nn.Module):
         _, counts = torch.unique(self.__edges_flat_idx, sorted=True, return_inverse=False, return_counts=True)
         max_edge_count_per_pair = max(counts)
         indices = torch.argsort(self.__edges_flat_idx, stable=True)
-        range_vector = torch.arange(max_edge_count_per_pair).expand(counts.shape[0], max_edge_count_per_pair)
+        range_vector = torch.arange(max_edge_count_per_pair, device=self.__device).expand(counts.shape[0], max_edge_count_per_pair)
         mask = (range_vector < counts.unsqueeze(1))
         edge_mat_indices = range_vector[mask][indices.argsort(stable=True)]
 
@@ -87,57 +87,11 @@ class BatchSampler(torch.nn.Module):
         # Construct the batch edge states
         batch_states = torch.sparse.mm(selection_mat, self.__edge_states_mat).values()
 
-        bins_num = len(self.__bin_bounds) - 1
-        # Expand the batch edges, times and states with the bin border times
-        expanded_pair_idx = torch.concat((
-            batch_flat_idx_combin.repeat_interleave(repeats=bins_num, dim=0),
-            output.indices()[0]
-        ))
-        expanded_times = torch.concat((
-            self.__bin_bounds[:-1].repeat(len(batch_flat_idx_combin)),
-            batch_times
-        ))
-        expanded_states = torch.concat((
-            torch.zeros(bins_num * len(batch_flat_idx_combin), dtype=torch.float, device=self.__device),
-            batch_states.to(torch.float)
-        ))
-        # Mark the first time of bin borders to detect later the pair edges
-        border_marked_idx = torch.concat((
-            torch.eye(1, bins_num, dtype=torch.float, device=self.__device).squeeze(0).repeat(
-                len(batch_flat_idx_combin)),
-            torch.ones(len(batch_states), dtype=torch.float, device=self.__device)
-        ))
-        # An indicator vector to detect additional edge times
-        is_edge = torch.concat((
-            torch.zeros(bins_num * len(batch_flat_idx_combin), dtype=torch.float, device=self.__device),
-            torch.ones(len(batch_states), dtype=torch.float, device=self.__device)
-        ))
-        # Concatenate all the tensors
-        border = torch.vstack((expanded_pair_idx, expanded_times, expanded_states, border_marked_idx, is_edge))
-        # Firstly, sort with respect to the pair indices, then time and finally states.
-        border = border[:, border[2].abs().argsort(stable=True)]
-        border = border[:, border[1].argsort(stable=True)]
-        border = border[:, border[0].argsort(stable=True)]
+        expanded_pairs, expanded_times, expanded_states, is_edge, delta_t = utils.expand_data(
+            nodes_num=self.__nodes_num, directed=self.__directed, bin_bounds=self.__bin_bounds,
+            edge_pair_flat_idx=output.indices()[0], edge_times=batch_times, edge_states=batch_states,
+            border_pair_flat_idx=batch_flat_idx_combin, device=self.__device
+        )
 
-        expanded_pair_idx, expanded_times, _, border_marked_idx, is_edge = border
-
-        # Compute the expanded states
-        border_cum_sum = border_marked_idx.cumsum(0) - 1
-        border_cum_sum[is_edge == 1] -= 1
-        counts = torch.bincount(border_cum_sum.to(torch.long), minlength=len(batch_states)+len(batch_flat_idx_combin) )
-        expanded_states = torch.repeat_interleave(border[2][border_marked_idx == 1], counts).to(torch.long)
-
-        # Compute the delta time
-        delta_t = expanded_times[1:] - expanded_times[:-1]
-        mask = (delta_t < 0)
-        delta_t[mask] = self.__bin_bounds[-1] + delta_t[mask]
-        delta_t = torch.concat((delta_t, (self.__bin_bounds[-1] - expanded_times[-1]).unsqueeze(0)))
-
-        # Convert the linear indices to matrix indices
-        expanded_pairs = utils.flatIdx2matIdx(expanded_pair_idx, n=self.__nodes_num, is_directed=self.__directed)
-
-        # If there is a zero time and if it is an edge, then make it non-edge
-        # is_edge[expanded_times == 0] = 0
-
-        return batch_nodes, expanded_pairs, expanded_times, expanded_states, is_edge.to(torch.bool), delta_t
+        return batch_nodes, expanded_pairs, expanded_times, expanded_states, is_edge, delta_t
 

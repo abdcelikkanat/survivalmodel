@@ -68,7 +68,7 @@ class Dataset:
                         raise ValueError("Self loops are not allowed!")
 
                     # Add the time
-                    edge_times.append( float(tokens[2]) )
+                    edge_times.append( int(tokens[2]) )
 
                     # Add the state if given
                     if len(tokens) > 3:

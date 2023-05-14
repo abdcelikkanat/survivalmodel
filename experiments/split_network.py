@@ -189,7 +189,7 @@ train_dataset = Dataset(
         torch.as_tensor(train_pairs, dtype=torch.long).T,
         repeats=torch.as_tensor(list(map(len, train_times)), dtype=torch.long), dim=1
     ),
-    edge_times=torch.as_tensor([t for pair_times in train_times for t in pair_times], dtype=torch.float),
+    edge_times=torch.as_tensor([t for pair_times in train_times for t in pair_times], dtype=torch.long),
     edge_states=torch.as_tensor([s for pair_states in train_states for s in pair_states], dtype=torch.long),
 )
 min_time, max_time = train_dataset.get_init_time(), train_dataset.get_last_time()
@@ -328,28 +328,6 @@ with open(prediction_path, 'w') as f:
     for element in sorted(triplets, key=lambda x: (x[2], x[0], x[1], x[3])):
         f.write(f"{element[0]}\t{element[1]}\t{element[2]}\t{element[3]}\n")
 
-
-
-# # Save the training pair and events
-# os.makedirs(os.path.join(output_folder, "completion"))
-# with open(os.path.join(output_folder, "completion", "pairs.pkl"), 'wb') as f:
-#     pickle.dump(completion_pairs, f)
-# with open(os.path.join(output_folder, "completion", "events.pkl"), 'wb') as f:
-#     pickle.dump(completion_events, f)
-#
-# # Save the mask pairs
-# os.makedirs(os.path.join(output_folder, "mask"))
-# with open(os.path.join(output_folder, "mask", "pairs.pkl"), 'wb') as f:
-#     pickle.dump(mask_pairs, f)
-# with open(os.path.join(output_folder, "mask", "events.pkl"), 'wb') as f:
-#     pickle.dump(mask_events, f)
-#
-# # Save the prediction pairs
-# os.makedirs(os.path.join(output_folder, "prediction"))
-# with open(os.path.join(output_folder, "prediction", "pairs.pkl"), 'wb') as f:
-#     pickle.dump(pred_pairs, f)
-# with open(os.path.join(output_folder, "prediction", "events.pkl"), 'wb') as f:
-#     pickle.dump(pred_events, f)
 
 if verbose:
     print(f"\t+ Completed.")
