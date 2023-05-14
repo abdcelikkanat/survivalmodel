@@ -3,7 +3,7 @@
 BASEFOLDER="/work3/abce/survival"
 PYTHON="/appl/python/3.11.0/bin/python3"
 export PYTHONPATH="${PYTHONPATH}:/${BASEFOLDER}"
-SCRIPT="${BASEFOLDER}/experiments/run.py"
+SCRIPT="${BASEFOLDER}/experiments/split_network.py"
 ########################################################################################################################
 SEED=19
 DATASETS=( high-school )
