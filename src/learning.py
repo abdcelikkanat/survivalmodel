@@ -140,16 +140,7 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         # Define the optimizers and parameter group names
         self.group_optimizers = []
-        #self.param_groups = [["v"], ["v", "x0"], ["v", "x0", "prior"]]
-        # self.param_groups = [["x0"], ["v",], ["v", "prior"]]
-        # self.param_groups = [["x0", "v", "prior"]]
-        # self.param_groups = [["v"], ["v", "x0"], ]
-        #self.group_epoch_weights = [1.0, 1.0, 1.0 ] #[1.0, 1.0, 1.0] #[1.0] #
-
-        #self.param_groups = [["v"], ["v", "x0"],]
-        #self.group_epoch_weights = [1.0, 1.0]
-        
-        self.param_groups = [["v"], ["beta", "x0", "v"], ["beta", "x0", "v", "prior"] ]
+        self.param_groups = [["v"], ["x0", "v"], ["beta", "x0", "v", "prior"] ]
         self.group_epoch_weights = [1.0, 1.0, 1.0]
 
         # For each group of parameters, add a new optimizer
