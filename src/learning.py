@@ -95,7 +95,7 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         # Select the masked pairs
         self.__masked_pair_indices = utils.matIdx2flatIdx(
-            i=masked_dataset.get_edges(0), j=masked_dataset.get_edges(0), n=self.get_nodes_num(),
+            i=masked_dataset.get_edges(0), j=masked_dataset.get_edges(1), n=self.get_nodes_num(),
             is_directed=self.is_directed(), dtype=torch.long
         ).unique().to(self.get_device()) if masked_dataset is not None else None
 
