@@ -231,9 +231,16 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         if self.__masked_pair_indices is not None:
 
-            selected_indices = (utils.matIdx2flatIdx(
+            # selected_indices = (utils.matIdx2flatIdx(
+            #     i=expanded_pairs[0], j=expanded_pairs[1], n=self.get_nodes_num(), is_directed=self.is_directed()
+            # ).unsqueeze(1) == self.__masked_pair_indices).any(1) == False
+
+            expanded_pairs_idx = utils.matIdx2flatIdx(
                 i=expanded_pairs[0], j=expanded_pairs[1], n=self.get_nodes_num(), is_directed=self.is_directed()
-            ).unsqueeze(1) == self.__masked_pair_indices).any(1) == False
+            )
+            unique_el, inverse_idx = torch.unique(expanded_pairs_idx, return_inverse=True)
+            selected_el = (unique_el.unsqueeze(1) == self.__masked_pair_indices).any(1)
+            selected_indices = selected_el[inverse_idx] == False
 
             expanded_pairs = expanded_pairs[:, selected_indices]
             expanded_times = expanded_times[selected_indices]
