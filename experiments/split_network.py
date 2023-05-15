@@ -125,6 +125,7 @@ for i in data_dict.keys():
 
 # Construct an undirected static graph from the links in the training set
 train_graph = nx.DiGraph() if directed else nx.Graph()
+train_graph.add_nodes_from(range(nodes_num))
 train_graph.add_edges_from(train_pairs)
 
 if verbose:

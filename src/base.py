@@ -410,14 +410,26 @@ class BaseModel(torch.nn.Module):
         :return: A vector of shape L
         """
 
-        beta_ij = self.get_beta_ij(pairs=edges, pair_states=edge_states)
-
         if self.is_signed():
-            intensity = beta_ij + edge_states * torch.norm(
+
+            beta_ij_plus = self.get_beta_ij(
+                pairs=edges, pair_states=torch.ones(len(edge_states), dtype=torch.long, device=self.get_device())
+            )
+            beta_ij_neg = self.get_beta_ij(
+                pairs=edges, pair_states=torch.zeros(len(edge_states), dtype=torch.long, device=self.get_device())
+            )
+
+            beta_ij_pm = (1 - (edge_states.absolute() - edge_states) / 2) * beta_ij_plus + \
+                         (1 - (edge_states.absolute() + edge_states) / 2) * beta_ij_neg
+
+            intensity = beta_ij_pm + edge_states * torch.norm(
                 self.get_delta_rt(time_list=time_list, pairs=edges), p=2, dim=1, keepdim=False
             )**2
 
         else:
+
+            beta_ij = self.get_beta_ij(pairs=edges, pair_states=edge_states)
+
             intensity = beta_ij + (2.*edge_states-1.) * torch.norm(
                 self.get_delta_rt(time_list=time_list, pairs=edges), p=2, dim=1, keepdim=False
             ) ** 2
@@ -453,7 +465,13 @@ class BaseModel(torch.nn.Module):
         delta_v = self.get_delta_v(bin_indices=bin_indices, pairs=pairs, standardize=standardize)
 
         # Compute the beta sums
-        beta_ij = self.get_beta_ij(pairs=pairs, pair_states=states)
+        beta_ij_plus = self.get_beta_ij(
+            pairs=pairs, pair_states=torch.ones(len(states), dtype=torch.long, device=self.get_device())
+        )
+        beta_ij_neg = self.get_beta_ij(
+            pairs=pairs, pair_states=torch.zeros(len(states), dtype=torch.long, device=self.get_device())
+        )
+        # beta_ij = self.get_beta_ij(pairs=pairs, pair_states=states)
 
         norm_delta_r = torch.norm(delta_r, p=2, dim=1, keepdim=False)
         norm_delta_v = torch.norm(delta_v, p=2, dim=1, keepdim=False) + utils.EPS
@@ -464,8 +482,8 @@ class BaseModel(torch.nn.Module):
 
         term0 = 0.5 * torch.sqrt(torch.as_tensor(utils.PI, device=self.__device)) * inv_norm_delta_v
         # term1 = torch.exp(beta_ij - (2*states-1)*(r**2 - norm_delta_r**2) )
-        term1_plus = torch.exp(beta_ij - (r**2 - norm_delta_r**2))
-        term1_neg = torch.exp(beta_ij + (r**2 - norm_delta_r**2))
+        term1_plus = torch.exp(beta_ij_plus - (r**2 - norm_delta_r**2))
+        term1_neg = torch.exp(beta_ij_neg + (r**2 - norm_delta_r**2))
 
         term2_u_plus = utils.erfi_approx(delta_t*norm_delta_v+r)
         term2_l_plus = utils.erfi_approx(r)
