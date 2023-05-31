@@ -619,11 +619,15 @@ class BaseModel(torch.nn.Module):
             x0v_r = torch.hstack((x0_r, v_r))
 
         # Compute the negative log-likelihood
-        d_s = torch.kron(self.get_prior_b_sigma_s()**2, self.get_prior_c_sigma_s()**2)
+        d_s = torch.kron(
+            torch.index_select(self.get_prior_b_sigma_s(), index=nodes, dim=0)**2, self.get_prior_c_sigma_s()**2
+        )
         d_s = torch.kron(d_s, torch.ones(self.get_dim(), device=self.get_device(), dtype=torch.float))
         log_prior_s = -0.5*(final_dim*utils.LOG2PI+final_dim*torch.log(lambda_sq)+(1./lambda_sq)*(x0v_s**2 @ d_s))
         if self.is_directed():
-            d_r = torch.kron(self.get_prior_b_sigma_r()**2, self.get_prior_c_sigma_r()**2)
+            d_r = torch.kron(
+                torch.index_select(self.get_prior_b_sigma_r(), index=nodes, dim=0)**2, self.get_prior_c_sigma_r()**2
+            )
             d_r = torch.kron(d_r, torch.ones(self.get_dim(), device=self.get_device(), dtype=torch.float))
             log_prior_r = -0.5*(final_dim*utils.LOG2PI+final_dim*torch.log(lambda_sq)+(1./lambda_sq)*(x0v_r**2 @ d_r))
 
