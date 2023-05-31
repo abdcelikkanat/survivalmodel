@@ -59,21 +59,21 @@ def durations2samples(pos_durations, zero_durations, neg_durations, max_sample_s
     )
     zero_pairs, zero_times, zero_labels = [], [], []
     for idx in zero_chosen_idx:
-        zero_pairs.append((zero_durations[idx][0].item(), zero_durations[idx][1].item()))
+        zero_pairs.append((zero_durations[idx][0], zero_durations[idx][1]))
         zero_times.append((zero_durations[idx][2].item() + zero_durations[idx][3].item())/2)
-        zero_labels.append(zero_durations[idx][4].item())
+        zero_labels.append(zero_durations[idx][4])
 
     pos_pairs, pos_times, pos_labels = [], [], []
     for idx in range(len(pos_durations)):
-        pos_pairs.append((pos_durations[idx][0].item(), pos_durations[idx][1].item()))
+        pos_pairs.append((pos_durations[idx][0], pos_durations[idx][1]))
         pos_times.append((pos_durations[idx][2].item() + pos_durations[idx][3].item())/2)
-        pos_labels.append(pos_durations[idx][4].item())
+        pos_labels.append(pos_durations[idx][4])
 
     neg_pairs, neg_times, neg_labels = [], [], []
     for idx in range(len(neg_durations)):
-        neg_pairs.append((neg_durations[idx][0].item(), neg_durations[idx][1].item()))
+        neg_pairs.append((neg_durations[idx][0], neg_durations[idx][1]))
         neg_times.append((neg_durations[idx][2].item() + neg_durations[idx][3].item())/2)
-        neg_labels.append(neg_durations[idx][4].item())
+        neg_labels.append(neg_durations[idx][4])
 
     samples = {'zero': {'pairs': zero_pairs, 'times': zero_times, 'labels': zero_labels},
                'pos': {'pairs': pos_pairs, 'times': pos_times, 'labels': pos_labels},
