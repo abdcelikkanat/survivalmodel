@@ -64,7 +64,7 @@ nodes_num = dataset.get_nodes_num()
 # Get the minimum and maximum time values
 min_time, max_time = dataset.get_init_time(), dataset.get_last_time()
 
-data_dict = dataset.get_data_dict()
+data_dict = dataset.get_data_dict(weights=True)
 directed = dataset.is_directed()
 signed = dataset.is_signed()
 # edges, times, states = dataset.get_edges(), dataset.get_times(), dataset.get_states()
@@ -244,7 +244,7 @@ if completion_size:
     completion_pairs = sampled_pairs[mask_size:]
 
 # Set the completion and mask events
-first_half_data_dict = first_half_dataset.get_data_dict()
+first_half_data_dict = first_half_dataset.get_data_dict(weights=True)
 mask_events = [
     [e for e, _ in first_half_data_dict[pair[0]][pair[1]]]
     if pair[0] in first_half_data_dict and pair[1] in first_half_data_dict[pair[0]]
