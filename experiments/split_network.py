@@ -184,7 +184,7 @@ if len(list(nx.isolates(first_half_graph))) != 0:
     if verbose:
         print(f"\t\t+ Completed.")
 
-
+# Construct the first half dataset
 first_half_dataset = Dataset(
     nodes_num=nodes_num, directed=directed, signed=signed,
     edges=torch.repeat_interleave(
@@ -192,7 +192,7 @@ first_half_dataset = Dataset(
         repeats=torch.as_tensor(list(map(len, first_half_times)), dtype=torch.long), dim=1
     ),
     edge_times=torch.as_tensor([t for pair_times in first_half_times for t in pair_times], dtype=torch.long),
-    edge_states=torch.as_tensor([s for pair_states in first_half_states for s in pair_states], dtype=torch.long),
+    edge_weights=torch.as_tensor([s for pair_states in first_half_states for s in pair_states]).to(torch.long),
 )
 min_time, max_time = int(first_half_dataset.get_init_time()), int(first_half_dataset.get_last_time())
 ########################################################################################################################
