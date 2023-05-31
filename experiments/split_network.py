@@ -59,7 +59,7 @@ sys.stdout = f
 
 # Load the dataset
 dataset = Dataset()
-dataset.read_edgelist(edges_file)
+dataset.read_edge_list(edges_file)
 nodes_num = dataset.get_nodes_num()
 # Get the minimum and maximum time values
 min_time, max_time = dataset.get_init_time(), dataset.get_last_time()
