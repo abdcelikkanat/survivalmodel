@@ -39,7 +39,7 @@ set_seed(seed=seed)
 
 # Read the train dataset
 dataset = Dataset()
-dataset.read_edgelist(split_folder + "/first_half.edges")
+dataset.read_edge_list(split_folder + "/first_half.edges")
 dataset.print_info()
 init_time, last_time = dataset.get_init_time(), dataset.get_last_time()
 nodes_num = dataset.get_nodes_num()
@@ -154,7 +154,7 @@ def get_durations(data_dict, directed, nodes_num, init_time, last_time):
 # Construct the samples for the residual network
 # Read the residual dataset
 residual_dataset = Dataset()
-residual_dataset.read_edgelist(os.path.join(split_folder, "./residual.edges"))
+residual_dataset.read_edge_list(os.path.join(split_folder, "./residual.edges"))
 residual_data_dict = residual_dataset.get_data_dict()
 
 res_pos_dur, res_zero_dur, res_neg_dur = get_durations(residual_data_dict, is_directed, nodes_num, init_time, last_time)
@@ -163,7 +163,7 @@ res_samples = durations2samples(res_pos_dur, res_zero_dur, res_neg_dur, max_samp
 # Construct the samples for the completion set
 # Read the residual dataset
 comp_dataset = Dataset()
-comp_dataset.read_edgelist(os.path.join(split_folder, "./completion.edges"))
+comp_dataset.read_edge_list(os.path.join(split_folder, "./completion.edges"))
 comp_data_dict = comp_dataset.get_data_dict()
 
 comp_pos_dur, comp_zero_dur, comp_neg_dur = get_durations(comp_data_dict, is_directed, nodes_num, init_time, last_time)
@@ -172,7 +172,7 @@ comp_samples = durations2samples(comp_pos_dur, comp_zero_dur, comp_neg_dur, max_
 # Construct the samples for the prediction set
 # Read the residual dataset
 pred_dataset = Dataset()
-pred_dataset.read_edgelist(os.path.join(split_folder, "./prediction.edges"))
+pred_dataset.read_edge_list(os.path.join(split_folder, "./prediction.edges"))
 pred_data_dict = pred_dataset.get_data_dict()
 
 pred_pos_dur, pred_zero_dur, pred_neg_dur = get_durations(
