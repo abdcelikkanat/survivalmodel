@@ -1,14 +1,11 @@
 import os
 import sys
-import pickle
 import networkx as nx
 from argparse import ArgumentParser, RawTextHelpFormatter
 import torch
-
 import utils
 from src.dataset import Dataset
 from utils import set_seed, flatIdx2matIdx, matIdx2flatIdx
-import numpy as np
 
 ########################################################################################################################
 
@@ -51,7 +48,6 @@ seed = args.seed
 
 # Set the seed value
 set_seed(seed=seed)
-np.random.seed(seed)
 
 # Create the target folder
 os.makedirs(output_folder)
@@ -65,6 +61,8 @@ sys.stdout = f
 dataset = Dataset()
 dataset.read_edgelist(edges_file)
 nodes_num = dataset.get_nodes_num()
+# Get the minimum and maximum time values
+min_time, max_time = dataset.get_init_time(), dataset.get_last_time()
 
 data_dict = dataset.get_data_dict()
 directed = dataset.is_directed()
@@ -79,121 +77,124 @@ if verbose:
 # Firstly, the network will be split into two part
 split_ratio = 1.0 - prediction_ratio
 
-# Get the minimum and maximum time values
-min_time, max_time = dataset.get_init_time(), dataset.get_last_time()
+# Get the split time
 split_time = int(min_time + split_ratio * (max_time - min_time))
 
-
-train_pairs, train_times, train_states = [], [], []
-pred_pairs, pred_times, pred_states = [], [], []
+first_half_pairs, first_half_times, first_half_states = [], [], []
+second_half_pairs, second_half_times, second_half_states = [], [], []
 for i in data_dict.keys():
     for j in data_dict[i].keys():
 
-        train_pairs.append((i, j))
-        train_times.append([])
-        train_states.append([])
+        first_half_pairs.append((i, j))
+        first_half_times.append([])
+        first_half_states.append([])
 
-        pred_pairs.append((i, j))
-        pred_times.append([])
-        pred_states.append([])
+        second_half_pairs.append((i, j))
+        second_half_times.append([])
+        second_half_states.append([])
 
         for time, state in data_dict[i][j]:
 
+            # Split the pair events into two parts
             if time <= split_time:
-                train_times[-1].append(time)
-                train_states[-1].append(state)
+                first_half_times[-1].append(time)
+                first_half_states[-1].append(state)
             else:
-                pred_times[-1].append(time)
-                pred_states[-1].append(state)
+                second_half_times[-1].append(time)
+                second_half_states[-1].append(state)
 
-        # Remove the pair if it does not contain any event
-        if len(train_times[-1]) == 0:
-            train_pairs.pop()
-            train_times.pop()
-            train_states.pop()
+            # Remove the pair if it does not contain any event
+            if len(first_half_times[-1]) == 0:
 
-        # If the train pair has edge, add the state for the prediction set
-        else:
-            pred_times[-1].append(split_time)
-            pred_states[-1].append( max(zip(train_times, train_states[-1]), key=lambda value: value[0])[1] )
+                first_half_pairs.pop()
+                first_half_times.pop()
+                first_half_states.pop()
 
-        # Remove the pair if it does not contain any event (train set can't contain any event but prediction set can
-        if len(pred_times[-1]) == 0:
-            pred_pairs.pop()
-            pred_times.pop()
-            pred_states.pop()
+                second_half_pairs.pop()
+                second_half_times.pop()
+                second_half_states.pop()
 
-# Construct an undirected static graph from the links in the training set
-train_graph = nx.DiGraph() if directed else nx.Graph()
-train_graph.add_nodes_from(range(nodes_num))
-train_graph.add_edges_from(train_pairs)
+            # If the train pair has edge, add the last state of the first half to the prediction set
+            else:
+                second_half_times[-1].append(split_time)
+                second_half_states[-1].append(
+                    max(zip(first_half_times, first_half_states[-1]), key=lambda value: value[0])[1]
+                )
+
+# Construct a static graph from the links in the training set
+first_half_graph = nx.DiGraph() if directed else nx.Graph()
+first_half_graph.add_nodes_from(range(nodes_num))
+first_half_graph.add_edges_from(first_half_pairs)
 
 if verbose:
-    print(f"\t+ Training graph has {train_graph.number_of_nodes()} nodes.")
-    print(f"\t+ Training graph has {train_graph.number_of_edges()} pairs having at least one events.")
-    print(f"\t+ Prediction set has {len(np.unique(np.asarray(pred_pairs)))} nodes.")
-    print(f"\t+ Prediction set has {len(pred_pairs)} pairs having at least one events.")
+    print(f"\t+ The static version of the first half graph has {first_half_graph.number_of_nodes()} nodes.")
+    print(f"\t+ The static version of the first half has {first_half_graph.number_of_edges()} pairs.")
+    print(f"\t+ The first half has {sum(map(len, first_half_times))} events.")
+    print(f"\t+ The second half has {len(torch.unique(torch.asarray(second_half_pairs)))} unique nodes.")
+    print(f"\t+ The second half has {len(second_half_pairs)} pairs.")
+    print(f"\t+ The second half has {sum(map(len, first_half_times))} events.")
 
-# If there are any nodes which do not have any events during the training timeline,
+# If there are any nodes, which do not have any events during the first half of the timeline,
 # the graph must be relabeled and these nodes must be removed from the testing set as well.
 newlabel = None
-if len(list(nx.isolates(train_graph))) != 0:
+if len(list(nx.isolates(first_half_graph))) != 0:
 
-    isolated_nodes = list(nx.isolates(train_graph))
+    isolated_nodes = list(nx.isolates(first_half_graph))
     if verbose:
-        print(f"\t\t+ Training graph has {len(isolated_nodes)} isolated nodes.")
+        print(f"\t\t+ The first half graph has {len(isolated_nodes)} isolated nodes.")
 
-    n, count = 0, 0
-    while n < len(pred_pairs):
-        i, j = pred_pairs[n]
+    # Remove the isolated nodes from the first half pairs/events/states lists
+    idx, count = 0, 0
+    while idx < len(first_half_pairs):
+        i, j = first_half_pairs[idx]
         if i in isolated_nodes or j in isolated_nodes:
-            pred_pairs.pop(n)
-            pred_times.pop(n)
-            pred_states.pop(n)
+            first_half_pairs.pop(idx)
+            first_half_times.pop(idx)
+            first_half_states.pop(idx)
             count += 1
         else:
-            n += 1
+            idx += 1
 
     # Remove the isolated nodes from the networkx graph
-    train_graph.remove_nodes_from(isolated_nodes)
+    first_half_graph.remove_nodes_from(isolated_nodes)
 
     if verbose:
-        print(f"\t\t+ {count} pairs have been removed from the prediction set.")
-        print(f"\t\t+ The prediction set has currently {len(np.unique(np.asarray(pred_pairs)))} nodes.")
-        print(f"\t\t+ The prediction set has currently {len(pred_pairs)} pairs having at least one events.")
+        print(f"\t\t+ {count} pairs have been removed from the first half set.")
+        print(f"\t\t+ The prediction set has currently {len(torch.unique(torch.asarray(second_half_pairs)))} nodes.")
+        print(f"\t\t+ The prediction set has currently {len(second_half_pairs)} pairs having at least one events.")
 
     # Set the number of nodes
-    nodes_num = train_graph.number_of_nodes()
+    nodes_num = first_half_graph.number_of_nodes()
 
     if verbose:
         print(f"\t+ Nodes are being relabeled.")
 
-    # Relabel nodes in the training set
-    newlabel = {node: idx for idx, node in enumerate(train_graph.nodes())}
-    for n, pair in enumerate(train_pairs):
-        train_pairs[n] = (newlabel[pair[0]], newlabel[pair[1]])
+    # Relabel nodes in the first half set
+    newlabel = {node: idx for idx, node in enumerate(first_half_graph.nodes())}
+    for idx, pair in enumerate(first_half_pairs):
+        first_half_pairs[idx] = (newlabel[pair[0]], newlabel[pair[1]])
 
-    # Relabel nodes in the prediction set
-    for n, pair in enumerate(pred_pairs):
-        pred_pairs[n] = (newlabel[pair[0]], newlabel[pair[1]])
+    # Relabel nodes in the second half set
+    for idx, pair in enumerate(second_half_pairs):
+        second_half_pairs[idx] = (newlabel[pair[0]], newlabel[pair[1]])
 
     # Relabel nodes in the networkx object
-    train_graph = nx.relabel_nodes(G=train_graph, mapping=newlabel)
+    first_half_graph = nx.relabel_nodes(G=first_half_graph, mapping=newlabel)
 
     if verbose:
         print(f"\t\t+ Completed.")
 
 
-train_dataset = Dataset(
+first_half_dataset = Dataset(
     nodes_num=nodes_num, directed=directed, signed=signed,
     edges=torch.repeat_interleave(
-        torch.as_tensor(train_pairs, dtype=torch.long).T,
-        repeats=torch.as_tensor(list(map(len, train_times)), dtype=torch.long), dim=1
+        torch.as_tensor(first_half_pairs, dtype=torch.long).T,
+        repeats=torch.as_tensor(list(map(len, first_half_times)), dtype=torch.long), dim=1
     ),
-    edge_times=torch.as_tensor([t for pair_times in train_times for t in pair_times], dtype=torch.long),
-    edge_states=torch.as_tensor([s for pair_states in train_states for s in pair_states], dtype=torch.long),
+    edge_times=torch.as_tensor([t for pair_times in first_half_times for t in pair_times], dtype=torch.long),
+    edge_states=torch.as_tensor([s for pair_states in first_half_states for s in pair_states], dtype=torch.long),
 )
-min_time, max_time = int(train_dataset.get_init_time()), int(train_dataset.get_last_time())
+min_time, max_time = int(first_half_dataset.get_init_time()), int(first_half_dataset.get_last_time())
 ########################################################################################################################
 
 if verbose:
@@ -201,27 +202,30 @@ if verbose:
 
 # Sample the masking and completion pairs
 all_possible_pair_num = nodes_num * (nodes_num - 1)
-if directed:
+if not directed:
     all_possible_pair_num = all_possible_pair_num // 2
 
 mask_size = int(all_possible_pair_num * masking_ratio)
 completion_size = int(all_possible_pair_num * completion_ratio)
 total_sample_size = mask_size + completion_size
 
+
 # Construct pair indices
-all_pos_pairs = list([(i, j) for i, j in utils.pair_iter(n=nodes_num, is_directed=directed)])
-np.random.shuffle(all_pos_pairs)
+all_pos_pairs = torch.as_tensor(list(utils.pair_iter(n=nodes_num, is_directed=directed)), dtype=torch.long).T
+perm = torch.randperm(all_possible_pair_num)
+all_pos_pairs = all_pos_pairs[:, perm]
 
 # Sample node pairs such that each node in the residual has at least one event
 sampled_pairs = []
-for k, pair in enumerate(all_pos_pairs):
-    i, j = pair
+for k, pair in enumerate(all_pos_pairs.T):
+    i, j = pair[0].item(), pair[1].item()
 
-    if train_graph.has_edge(i, j):
-        train_graph.remove_edge(i, j)
+    if first_half_graph.has_edge(i, j):
+        first_half_graph.remove_edge(i, j)
 
-        if len(list(nx.isolates(train_graph))) != 0:
-            train_graph.add_edge(i, j)
+        # Check if the residual graph has any isolated nodes (we don't check if the residual graph is connected or not)
+        if len(list(nx.isolates(first_half_graph))) != 0:
+            first_half_graph.add_edge(i, j)
         else:
             sampled_pairs.append((i, j))
     else:
@@ -240,37 +244,66 @@ if completion_size:
     completion_pairs = sampled_pairs[mask_size:]
 
 # Set the completion and mask events
-train_data_dict = train_dataset.get_data_dict()
-mask_events = [[e for e, _ in train_data_dict[pair[0]][pair[1]]] if pair[0] in train_data_dict and pair[1] in train_data_dict[pair[0]] else [min_time] for pair in mask_pairs ]
-mask_states = [[s for _, s in train_data_dict[pair[0]][pair[1]]] if pair[0] in train_data_dict and pair[1] in train_data_dict[pair[0]] else [0] for pair in mask_pairs]
-completion_events = [[e for e, _ in train_data_dict[pair[0]][pair[1]]] if pair[0] in train_data_dict and pair[1] in train_data_dict[pair[0]] else [min_time] for pair in completion_pairs]
-completion_states = [[s for _, s in train_data_dict[pair[0]][pair[1]]] if pair[0] in train_data_dict and pair[1] in train_data_dict[pair[0]] else [0] for pair in completion_pairs]
+first_half_data_dict = first_half_dataset.get_data_dict()
+mask_events = [
+    [e for e, _ in first_half_data_dict[pair[0]][pair[1]]]
+    if pair[0] in first_half_data_dict and pair[1] in first_half_data_dict[pair[0]]
+    else [min_time]
+    for pair in mask_pairs
+]
+mask_states = [
+    [s for _, s in first_half_data_dict[pair[0]][pair[1]]]
+    if pair[0] in first_half_data_dict and pair[1] in first_half_data_dict[pair[0]]
+    else [0]
+    for pair in mask_pairs
+]
+completion_events = [
+    [e for e, _ in first_half_data_dict[pair[0]][pair[1]]]
+    if pair[0] in first_half_data_dict and pair[1] in first_half_data_dict[pair[0]]
+    else [min_time]
+    for pair in completion_pairs
+]
+completion_states = [
+    [s for _, s in first_half_data_dict[pair[0]][pair[1]]]
+    if pair[0] in first_half_data_dict and pair[1] in first_half_data_dict[pair[0]]
+    else [0] for pair in completion_pairs
+]
 
 # Construct the residual pairs and events
 # Since we always checked in the previous process, every node has at least one event
-residual_pairs, residual_times, residual_states = train_pairs.copy(), train_times.copy(), train_states.copy()
+residual_pairs = first_half_pairs.copy()
+residual_times = first_half_times.copy()
+residual_states = first_half_states.copy()
 
 if completion_size:
-    completion_pair_indices = [int(matIdx2flatIdx(i=torch.as_tensor([pair[0]], dtype=torch.long), j=torch.as_tensor([pair[1]], dtype=torch.long), n=nodes_num, is_directed=directed)) for pair in completion_pairs]
+    completion_pair_indices = [
+        matIdx2flatIdx(
+            i=torch.as_tensor([pair[0]], dtype=torch.long), j=torch.as_tensor([pair[1]], dtype=torch.long),
+            n=nodes_num, is_directed=directed
+        ).item()
+        for pair in completion_pairs
+    ]
 
-    n = 0
-    while n < len(residual_pairs):
-        pair = residual_pairs[n]
-        if int(matIdx2flatIdx(i=torch.as_tensor([pair[0]], dtype=torch.long), j=torch.as_tensor([pair[1]], dtype=torch.long), n=nodes_num, is_directed=directed)) in completion_pair_indices:
-            residual_pairs.pop(n)
-            residual_times.pop(n)
-            residual_states.pop(n)
+    idx = 0
+    while idx < len(residual_pairs):
+        pair = residual_pairs[idx]
+        pair_idx = matIdx2flatIdx(
+            i=torch.as_tensor([pair[0]], dtype=torch.long), j=torch.as_tensor([pair[1]], dtype=torch.long),
+            n=nodes_num, is_directed=directed
+        ).item()
+        if pair_idx in completion_pair_indices:
+            residual_pairs.pop(idx)
+            residual_times.pop(idx)
+            residual_states.pop(idx)
         else:
-            n += 1
+            idx += 1
 
 if verbose:
     print(f"\t+ Masking set has {mask_size} pairs.")
-    mask_samples_event_pairs_num = sum([1 if len(pair_events) else 0 for pair_events in mask_events])
-    print(f"\t\t+ {mask_samples_event_pairs_num} masking pairs have at least one event. ")
+    print(f"\t\t+ {sum(map(len, mask_events))} masking pairs contain at least one event. ")
 
     print(f"\t+ Completion set has {completion_size} pairs.")
-    completion_samples_event_pairs_num = sum([1 if len(pair_events) else 0 for pair_events in completion_events])
-    print(f"\t\t+ {completion_samples_event_pairs_num} masking pairs have at least one event. ")
+    print(f"\t\t+ {sum(map(len, completion_events))} masking pairs have at least one event. ")
 
     print(f"\t+ Residual network has {len(residual_pairs)} event pairs.")
 
@@ -280,19 +313,21 @@ if verbose:
     print("- The files are being written...")
 
 # Save the training pair and events
-train_path = os.path.join(output_folder, "train.edges")
+first_half_path = os.path.join(output_folder, "first_half.edges")
 triplets = [
-    (pair[0], pair[1], t, s) for pair, pair_times, pair_states in zip(train_pairs, train_times, train_states)
+    (pair[0], pair[1], t, s)
+    for pair, pair_times, pair_states in zip(first_half_pairs, first_half_times, first_half_states)
     for t, s in zip(pair_times, pair_states)
 ]
-with open(train_path, 'w') as f:
+with open(first_half_path, 'w') as f:
     for element in sorted(triplets, key=lambda x: (x[2], x[0], x[1], x[3])):
         f.write(f"{element[0]}\t{element[1]}\t{element[2]}\t{element[3]}\n")
 
 # Save the residual pair and events
 residual_path = os.path.join(output_folder, "residual.edges")
 triplets = [
-    (pair[0], pair[1], t, s) for pair, pair_times, pair_states in zip(residual_pairs, residual_times, residual_states)
+    (pair[0], pair[1], t, s)
+    for pair, pair_times, pair_states in zip(residual_pairs, residual_times, residual_states)
     for t, s in zip(pair_times, pair_states)
 ]
 with open(residual_path, 'w') as f:
@@ -302,7 +337,8 @@ with open(residual_path, 'w') as f:
 # Save the completion pair and events
 completion_path = os.path.join(output_folder, "completion.edges")
 triplets = [
-    (pair[0], pair[1], t, s) for pair, pair_times, pair_states in zip(completion_pairs, completion_events, completion_states)
+    (pair[0], pair[1], t, s)
+    for pair, pair_times, pair_states in zip(completion_pairs, completion_events, completion_states)
     for t, s in zip(pair_times, pair_states)
 ]
 with open(completion_path, 'w') as f:
@@ -312,7 +348,8 @@ with open(completion_path, 'w') as f:
 # Save the mask pair and events
 mask_path = os.path.join(output_folder, "mask.edges")
 triplets = [
-    (pair[0], pair[1], t, s) for pair, pair_times, pair_states in zip(mask_pairs, mask_events, mask_states)
+    (pair[0], pair[1], t, s)
+    for pair, pair_times, pair_states in zip(mask_pairs, mask_events, mask_states)
     for t, s in zip(pair_times, pair_states)
 ]
 with open(mask_path, 'w') as f:
@@ -322,13 +359,13 @@ with open(mask_path, 'w') as f:
 # Save the prediction pairs
 prediction_path = os.path.join(output_folder, "prediction.edges")
 triplets = [
-    (pair[0], pair[1], t, s) for pair, pair_times, pair_states in zip(pred_pairs, pred_times, pred_states)
+    (pair[0], pair[1], t, s)
+    for pair, pair_times, pair_states in zip(second_half_pairs, second_half_times, second_half_states)
     for t, s in zip(pair_times, pair_states)
 ]
 with open(prediction_path, 'w') as f:
     for element in sorted(triplets, key=lambda x: (x[2], x[0], x[1], x[3])):
         f.write(f"{element[0]}\t{element[1]}\t{element[2]}\t{element[3]}\n")
-
 
 if verbose:
     print(f"\t+ Completed.")

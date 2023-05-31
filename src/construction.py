@@ -28,11 +28,18 @@ class ConstructionModel(torch.nn.Module):
         if type(beta_s) is torch.Tensor:
             self.__beta_s = torch.as_tensor(beta_s, dtype=torch.float, device=device)
         else:
-            self.__beta_s = beta_s * torch.ones(size=(self.__nodes_num, 2), dtype=torch.float, device=device)
+            print("Sampling beta_s...")
+            self.__beta_s = torch.vstack((
+                beta_s[0] * torch.ones(size=(self.__nodes_num, ), dtype=torch.float, device=device),
+                beta_s[1] * torch.ones(size=(self.__nodes_num, ), dtype=torch.float, device=device)
+            )).T
         if type(beta_r) is torch.Tensor:
             self.__beta_r = torch.as_tensor(beta_r, dtype=torch.float, device=device) if self.__directed else None
         else:
-            self.__beta_r = beta_r * torch.ones(size=(self.__nodes_num, 2), dtype=torch.float, device=device) if self.__directed else None
+            self.__beta_r = torch.vstack((
+                beta_r[0] * torch.ones(size=(self.__nodes_num, 1), dtype=torch.float, device=device),
+                beta_r[1] * torch.ones(size=(self.__nodes_num, 1), dtype=torch.float, device=device)
+            )).T if self.__directed else None
         # Set the prior hyper-parameters
         self.__prior_lambda = torch.as_tensor(prior_lambda, dtype=torch.float, device=device)
         self.__prior_sigma_s = torch.as_tensor(prior_sigma_s, dtype=torch.float, device=device)
@@ -69,12 +76,10 @@ class ConstructionModel(torch.nn.Module):
         '''
 
         # Constuct the node pairs
-        node_pairs = torch.triu_indices(self.__nodes_num, self.__nodes_num, offset=1, device=self.__device)
-        # If directed, add the lower triangular part
-        if self.__directed:
-            node_pairs = torch.cat((
-                node_pairs, torch.tril_indices(self.__nodes_num, self.__nodes_num, offset=-1, device=self.__device
-            )), dim=1)
+        node_pairs = torch.as_tensor(
+            list(utils.pair_iter(n=self.__nodes_num, is_directed=self.__directed)),
+            dtype=torch.long, device=self.__device
+        ).T
 
         # Sample the initial position and velocity tensors
         x0_s, v_s, x0_r, v_r = self.sample_x0_and_v()
@@ -98,10 +103,13 @@ class ConstructionModel(torch.nn.Module):
         ]
         pairs, events, states = zip(*sorted(triplets, key=lambda tri: tri[1]))
         # Convert the times to unix timestamps
-        events = (torch.as_tensor(events, dtype=torch.float)*86400*10).to(torch.long)
-        min_time = events.min()
-        max_time = events.max()
-        data = list(pairs), events, torch.as_tensor(states, dtype=torch.int8), self.__directed, 0, 86400*10
+        events = (torch.as_tensor(events, dtype=torch.float) * (1. / utils.EPS)).to(torch.long) #events = (torch.as_tensor(events, dtype=torch.float)*86400*1e6).to(torch.long)
+        # events = torch.as_tensor(events, dtype=torch.float)
+        # min_diff = (events[1:] - events[:-1]).abs().min()
+        # events = ((1. / min_diff) * events).to(torch.long)
+        # min_time = events.min()
+        # max_time = events.max()
+        data = list(pairs), events, torch.as_tensor(states, dtype=torch.int8), self.__directed, -1, -1
 
         return bm, data
 
@@ -171,6 +179,19 @@ class ConstructionModel(torch.nn.Module):
         else:
             x0_r, v_r = None, None
 
+        # ########################################################################################
+        # from torch.distributions.multivariate_normal import MultivariateNormal
+        # loc = torch.as_tensor([-1.0, 0.0])
+        # scale =0.1* torch.ones(2)
+        # mvn = MultivariateNormal(loc=loc, scale_tril=torch.diag(scale))
+        # x0_s = mvn.sample((self.__nodes_num//2, ) )
+        # loc = torch.as_tensor([+1.0, 0.0])
+        # scale = 0.1 * torch.ones(2)
+        # mvn = MultivariateNormal(loc=loc, scale_tril=torch.diag(scale))
+        # x0_s = torch.vstack((x0_s, mvn.sample((self.__nodes_num//2,))))
+        # v_s = torch.zeros(size=(self.__bins_num, self.__nodes_num, self.__dim))
+        # ########################################################################################
+
         return utils.standardize(x0_s), utils.standardize(v_s), utils.standardize(x0_r), utils.standardize(v_r)
 
     def __sample_events(self, node_pairs: torch.Tensor, bm: BaseModel) -> tuple[dict, dict]:
@@ -221,6 +242,10 @@ class ConstructionModel(torch.nn.Module):
             # Add the event times
             pair_events[(i.item(), j.item())].extend(ij_edge_times)
             pair_states[(i.item(), j.item())].extend(ij_edge_states)
+
+            # if i == 8 and j == 32:
+            #     print( ij_edge_times, self.__seed + flat_idx )
+            #     raise Exception
 
         return pair_events, pair_states
 

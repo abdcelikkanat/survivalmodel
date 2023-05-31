@@ -1,8 +1,10 @@
 import torch
+
+import utils
 from utils.common import flatIdx2matIdx
 
 
-def expand_data(nodes_num: int, directed: bool, bin_bounds:torch.Tensor, edge_pair_flat_idx: torch.LongTensor,
+def expand_data(nodes_num: int, directed: bool, bin_bounds: torch.Tensor, edge_pair_flat_idx: torch.LongTensor,
                 edge_times: torch.FloatTensor, edge_states: torch.LongTensor,
                 border_pair_flat_idx: torch.LongTensor = None, device: torch.device = "cpu"):
 
@@ -51,14 +53,16 @@ def expand_data(nodes_num: int, directed: bool, bin_bounds:torch.Tensor, edge_pa
 
     # Compute the delta time
     delta_t = expanded_times[1:] - expanded_times[:-1]
+    # delta_t of the last event time of each group will be negative, so set them to 1.0 - t
     mask = (delta_t < 0)
     delta_t[mask] = bin_bounds[-1] + delta_t[mask]
+    # Add the delta_t for the last time of the whole list
     delta_t = torch.concat((delta_t, (bin_bounds[-1] - expanded_times[-1]).unsqueeze(0)))
 
     # Convert the linear indices to matrix indices
     expanded_pairs = flatIdx2matIdx(expanded_pair_idx, n=nodes_num, is_directed=directed)
 
     # If there is a zero time and if it is an edge, then make it non-edge
-    # is_edge[expanded_times == 0] = 0
+    is_edge[expanded_times == 0] = 0
 
     return expanded_pairs, expanded_times, expanded_states, is_edge.to(torch.bool), delta_t

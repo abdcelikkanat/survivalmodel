@@ -75,7 +75,7 @@ def process(parser):
 
     # Load the dataset
     dataset = Dataset()
-    dataset.read_edgelist(edges_path)
+    dataset.read_edge_list(edges_path)
     nodes_num = dataset.get_nodes_num()
 
     # Load the model
@@ -110,7 +110,7 @@ def process(parser):
         rt_r = None
 
     anim = Animation(
-        rt_s=rt_s, rt_r=rt_r, frame_times=frame_times.detach().numpy(), data_dict=dataset.get_data_dict(),
+        rt_s=rt_s, rt_r=rt_r, frame_times=frame_times.detach().numpy(), data_dict=dataset.get_data_dict(weights=True),
         title=parser.title, font_size=parser.font_size, fig_size=parser.fig_size, fps=parser.fps,
         axis_off=parser.axis_off, padding=parser.padding,
         edge_alpha=parser.edge_alpha, edge_width=parser.edge_width, edge_color=parser.edge_color,

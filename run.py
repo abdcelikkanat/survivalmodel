@@ -33,9 +33,6 @@ def parse_arguments():
         '--dim', type=int, default=2, required=False, help='Dimension size'
     )
     parser.add_argument(
-        '--k', type=int, default=10, required=False, help='Latent dimension size of the prior element'
-    )
-    parser.add_argument(
         '--prior_lambda', type=float, default=1e6, required=False, help='Scaling coefficient of the covariance'
     )
     parser.add_argument(
@@ -66,7 +63,7 @@ def process(parser):
 
     # Load the dataset
     dataset = Dataset()
-    dataset.read_edgelist(parser.edges)
+    dataset.read_edge_list(parser.edges)
 
     # Get the number of nodes
     nodes_num = dataset.get_nodes_num()
@@ -77,10 +74,10 @@ def process(parser):
 
     # Read the masked pair file if exists
     if parser.mask_path is not None:
-        masked_dataset = Dataset()
-        masked_dataset.read_edgelist(parser.mask_path)
+        masked_data = Dataset()
+        masked_data.read_edge_list(parser.mask_path)
     else:
-        masked_dataset = parser.mask_path
+        masked_data = parser.mask_path
 
     # Print the information of the dataset
     if parser.verbose:
@@ -92,8 +89,7 @@ def process(parser):
         # Define the learning model
         lm = LearningModel(
             nodes_num=nodes_num, directed=directed, signed=signed, bins_num=parser.bins_num, dim=parser.dim,
-            prior_lambda=parser.prior_lambda, k=parser.k,
-            device=parser.device, verbose=parser.verbose, seed=parser.seed,
+            prior_lambda=parser.prior_lambda, device=parser.device, verbose=parser.verbose, seed=parser.seed,
         )
 
     else:
@@ -109,9 +105,8 @@ def process(parser):
 
     # Learn the hyper-parameters
     lm.learn(
-        dataset=dataset, masked_dataset=masked_dataset,
+        dataset=dataset, masked_data=masked_data, log_file_path=parser.log_path,
         lr=parser.lr, batch_size=parser.batch_size, epoch_num=parser.epoch_num, steps_per_epoch=parser.spe,
-        log_file_path=parser.log_path
     )
     # Save the model
     lm.save(path=parser.model_path)

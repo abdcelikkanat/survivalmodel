@@ -6,13 +6,13 @@ from src.animation import Animation
 
 #  Sample the intial position and velocity vectors
 args = {
-    'cluster_sizes': [5]*10, 'bins_num': 100, 'dim': 2, 'directed': False,   #[5]*4
-    'beta_s':+0.5, 'beta_r': 0.,
-    'prior_lambda': 1.5, #1.75e0 # Expand the space
-    'prior_sigma_s': 1e-1,'prior_sigma_r': 8e-2,  #1e-1 #1e-2,
+    'cluster_sizes': [20]*5, 'bins_num': 100, 'dim': 2, 'directed': False,   #[5]*4
+    'beta_s': [0., -1.25],  'beta_r': [0., 0.], #[-0.07, -0.5], 'beta_r': [0., 0.],
+    'prior_lambda': 3.0, #1.5, #1.75e0 # Expand the space
+    'prior_sigma_s': 7.5e-2, 'prior_sigma_r': 1e-1,  #1e-1 #1e-2,
     'prior_B_x0_logit_c_s': 1e6, 'prior_B_x0_logit_c_r': 1e+0, #(1e0, 1e+0)
-    'prior_B_ls_s': 1e-1, 'prior_B_ls_r': 5e-1, #(1e-3, 1e-3) # controls how crazy the nodes are, craziness ~ 1./value
-    'device': "cpu", 'verbose': True, 'seed': 18,
+    'prior_B_ls_s': 0.5e-1, 'prior_B_ls_r': 1e-1, #(1e-3, 1e-3) # controls how crazy the nodes are, craziness ~ 1./value
+    'device': "cpu", 'verbose': True, 'seed': 19,
 }
 # #  Sample the intial position and velocity vectors
 # args = {
@@ -26,7 +26,7 @@ args = {
 # }
 
 # Define the dataset name
-dataset_name = f"synthetic_may_{'directed' if args['directed'] else 'undirected'}"
+dataset_name = f"synthetic_fixed_{'directed' if args['directed'] else 'undirected'}"
 
 # Define the dataset folder path
 dataset_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'datasets', dataset_name)
@@ -74,9 +74,10 @@ else:
 dataset = Dataset()
 dataset.read_edgelist(os.path.join(dataset_folder, f"{dataset_name}.edges"))
 
+
 anim = Animation(
     rt_s=rt_s, rt_r=rt_r, frame_times=frame_times, axis_off=False,
-    data_dict=dataset.get_data_dict(),
+    data_dict=dataset.get_data_dict(), edge_alpha=1.
 )
 anim.save(anim_path, format="mp4")
 

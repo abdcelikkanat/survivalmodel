@@ -15,6 +15,8 @@ class SurviveDieProcess:
         self.__init_time = self.__critical_points[0]
         self.__num_of_bins = len(self.__critical_points)
 
+        self.__seed = seed
+
         # Find the max lambda values for each interval
         # For indexing, add first elements which will not be used
         self.__lambda_max = ([0], [0])
@@ -54,8 +56,12 @@ class SurviveDieProcess:
                 # Step 6
                 if U <= self.__lambda_func(t, state=states[-1])/self.__lambda_max[states[-1], J]:
                     # Don't need I for index, because we append t to S
-                    S.append(t.item())
-                    states.append(1 - states[-1])
+                    if len(S) and abs(S[-1] - t.item()) < utils.EPS:
+                        S.pop()
+                        states.pop()
+                    else:
+                        S.append(t.item())
+                        states.append(1 - states[-1])
                 # Step 7 -> Do step 2 then loop starts again at step 3
                 U = torch.rand(1)  # Random number
                 # Random variable from exponential dist.

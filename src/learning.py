@@ -9,29 +9,45 @@ from src.sampler import BatchSampler
 
 class LearningModel(BaseModel, torch.nn.Module):
 
-    def __init__(self, nodes_num: int, directed: bool, signed: bool, bins_num: int, dim: int,
-                 prior_lambda: float = 1e5, k=10,
+    def __init__(self, nodes_num: int, directed: bool, signed: bool, bins_num: int, dim: int, prior_lambda: float = 1e5,
                  device: torch.device = 'cpu', verbose: bool = False, seed: int = 19):
 
         utils.set_seed(seed)
 
         super(LearningModel, self).__init__(
-            x0_s=torch.nn.Parameter(2. * torch.rand(size=(nodes_num, dim), device=device) - 1., requires_grad=False),
-            x0_r=torch.nn.Parameter(2. * torch.rand(size=(nodes_num, dim), device=device) - 1., requires_grad=False) if directed else None,
-            v_s=torch.nn.Parameter(torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False),
-            v_r=torch.nn.Parameter(torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False) if directed else None,
-            beta_s=torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False),
-            beta_r=torch.nn.Parameter(2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False) if directed else None,
-            prior_lambda=torch.as_tensor(prior_lambda, dtype=torch.float, device=device),
-            prior_sigma_s=torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False),
-            prior_sigma_r=torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False) if directed else None,
-            prior_B_x0_logit_c_s=torch.nn.Parameter(torch.special.logit(torch.rand(size=(1, ), device=device)), requires_grad=False),
-            prior_B_x0_logit_c_r=torch.nn.Parameter(torch.special.logit(torch.rand(size=(1, ), device=device)), requires_grad=False) if directed else None,
-            prior_B_ls_s=torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False),
-            prior_B_ls_r=torch.nn.Parameter(2. * torch.rand(size=(1, ), device=device) - 1, requires_grad=False) if directed else None,
-            prior_C_Q_s=torch.nn.Parameter(2. * torch.rand(size=(nodes_num, k), device=device) - 1,  requires_grad=False),
-            prior_C_Q_r=torch.nn.Parameter(2. * torch.rand(size=(nodes_num, k), device=device) - 1,  requires_grad=False)  if directed else None,
-            prior_R_factor_inv_s = None, prior_R_factor_inv_r = None,
+            x0_s=torch.nn.Parameter(
+                2. * torch.rand(size=(nodes_num, dim), device=device) - 1., requires_grad=False
+            ),
+            x0_r=torch.nn.Parameter(
+                2. * torch.rand(size=(nodes_num, dim), device=device) - 1., requires_grad=False
+            ) if directed else None,
+            v_s=torch.nn.Parameter(
+                torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False
+            ),
+            v_r=torch.nn.Parameter(
+                torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False
+            ) if directed else None,
+            beta_s=torch.nn.Parameter(
+                2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False
+            ),
+            beta_r=torch.nn.Parameter(
+                2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False
+            ) if directed else None,
+            prior_lambda=torch.as_tensor(
+                prior_lambda, dtype=torch.float, device=device
+            ),
+            prior_b_sigma_s=torch.nn.Parameter(
+                2. * torch.randn(size=(bins_num + 1, ), device=device) - 1, requires_grad=False
+            ),
+            prior_b_sigma_r=torch.nn.Parameter(
+                2. * torch.randn(size=(bins_num + 1,), device=device) - 1, requires_grad=False
+            ) if directed else None,
+            prior_c_sigma_s=torch.nn.Parameter(
+                2. * torch.randn(size=(nodes_num,), device=device) - 1,  requires_grad=False
+            ),
+            prior_c_sigma_r=torch.nn.Parameter(
+                2. * torch.randn(size=(nodes_num,), device=device) - 1, requires_grad=False
+            ) if directed else None,
             directed=directed,
             signed=signed,
             device=device,
@@ -85,7 +101,7 @@ class LearningModel(BaseModel, torch.nn.Module):
                     param.requires_grad = prior_grad
 
     def learn(self, dataset, lr: float = 0.1, batch_size: int = 0, epoch_num: int = 100, steps_per_epoch=1,
-              masked_dataset=None, log_file_path=None):
+              masked_data=None, log_file_path=None):
 
         # Set the learning parameters
         self.__lr = lr
@@ -95,9 +111,9 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         # Select the masked pairs
         self.__masked_pair_indices = utils.matIdx2flatIdx(
-            i=masked_dataset.get_edges(0), j=masked_dataset.get_edges(1), n=self.get_nodes_num(),
+            i=masked_data.get_edges(0), j=masked_data.get_edges(1), n=self.get_nodes_num(),
             is_directed=self.is_directed(), dtype=torch.long
-        ).unique().to(self.get_device()) if masked_dataset is not None else None
+        ).unique().to(self.get_device()) if masked_data is not None else None
 
         # Scale the edge times to [0, 1]
         edge_times = dataset.get_times()
@@ -108,7 +124,7 @@ class LearningModel(BaseModel, torch.nn.Module):
         # Define the batch sampler
         bs = BatchSampler(
             edges=dataset.get_edges().to(self.get_device()), edge_times=edge_times.to(self.get_device()),
-            edge_states=dataset.get_states().to(self.get_device()),
+            edge_states=dataset.get_weights().to(self.get_device()),
             bin_bounds=self.get_bin_bounds(), nodes_num=self.get_nodes_num(), batch_size=self.__batch_size, 
             directed=self.is_directed(), device=self.get_device(), seed=self.get_seed()
         )
@@ -192,7 +208,7 @@ class LearningModel(BaseModel, torch.nn.Module):
         epoch_loss, epoch_nll = [], []
         for batch_num in range(self.__steps_per_epoch):
 
-            batch_nll, batch_nlp = self.__train_one_batch(bs=bs, batch_num=batch_num)
+            batch_nll, batch_nlp = self.__train_one_batch(bs=bs)
             batch_loss = batch_nll + batch_nlp
 
             epoch_loss.append(batch_loss)
@@ -222,7 +238,7 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         return epoch_loss, epoch_nll
 
-    def __train_one_batch(self, bs: BatchSampler, batch_num: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def __train_one_batch(self, bs: BatchSampler) -> tuple[torch.Tensor, torch.Tensor]:
 
         self.train()
 
@@ -230,10 +246,6 @@ class LearningModel(BaseModel, torch.nn.Module):
         batch_nodes, expanded_pairs, expanded_times, expanded_states, is_edge, delta_t = bs.sample()
 
         if self.__masked_pair_indices is not None:
-
-            # selected_indices = (utils.matIdx2flatIdx(
-            #     i=expanded_pairs[0], j=expanded_pairs[1], n=self.get_nodes_num(), is_directed=self.is_directed()
-            # ).unsqueeze(1) == self.__masked_pair_indices).any(1) == False
 
             expanded_pairs_idx = utils.matIdx2flatIdx(
                 i=expanded_pairs[0], j=expanded_pairs[1], n=self.get_nodes_num(), is_directed=self.is_directed()
@@ -248,13 +260,10 @@ class LearningModel(BaseModel, torch.nn.Module):
             is_edge = is_edge[selected_indices]
             delta_t = delta_t[selected_indices]
 
-        # Compute the R factor inverse if the batch number is 0
-        compute_R_factor_inv = True if batch_num == 0 else False
-
         # Finally, compute the negative log-likelihood and the negative log-prior for the batch
         batch_nll, batch_nlp = self.forward(
             nodes=batch_nodes, pairs=expanded_pairs, times=expanded_times, states=expanded_states,
-            is_edge=is_edge, delta_t=delta_t, compute_R_factor_inv=compute_R_factor_inv
+            is_edge=is_edge, delta_t=delta_t
         )
 
         # Divide the batch loss by the number of all possible pairs
@@ -266,15 +275,14 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         return average_batch_nll, average_batch_nlp
 
-    def forward(self, nodes: torch.Tensor, pairs: torch.LongTensor, times: torch.FloatTensor,
-                states: torch.LongTensor, is_edge: torch.BoolTensor, delta_t: torch.FloatTensor,
-                compute_R_factor_inv=True) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, nodes: torch.Tensor, pairs: torch.LongTensor, times: torch.FloatTensor, states: torch.LongTensor,
+                is_edge: torch.BoolTensor, delta_t: torch.FloatTensor) -> tuple[torch.Tensor, torch.Tensor]:
 
         # Get the negative log-likelihood
         nll = self.get_nll(pairs=pairs, times=times, states=states, is_edge=is_edge, delta_t=delta_t)
 
         # Get the negative log-prior and the R-factor inverse
-        nlp = self.get_neg_log_prior(nodes=nodes, compute_R_factor_inv=compute_R_factor_inv)
+        nlp = self.get_neg_log_prior(nodes=nodes)
 
         return nll, nlp
 
@@ -290,8 +298,7 @@ class LearningModel(BaseModel, torch.nn.Module):
             'signed': self.is_signed(),
             'bins_num': self.get_bins_num(),
             'dim': self.get_dim(),
-            'prior_lambda': self.get_prior_lambda(), 
-            'k': self.get_prior_k(),
+            'prior_lambda': self.get_prior_lambda(),
             'verbose': self.get_verbose(), 
             'seed': self.get_seed()
         }
