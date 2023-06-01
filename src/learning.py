@@ -36,17 +36,11 @@ class LearningModel(BaseModel, torch.nn.Module):
             prior_lambda=torch.as_tensor(
                 prior_lambda, dtype=torch.float, device=device
             ),
-            prior_b_sigma_s=torch.nn.Parameter(
-                2. * torch.randn(size=(bins_num + 1, ), device=device) - 1, requires_grad=False
+            prior_sigma_s=torch.nn.Parameter(
+                torch.randn(size=((bins_num+1) * nodes_num * dim, ), device=device), requires_grad=False
             ),
-            prior_b_sigma_r=torch.nn.Parameter(
-                2. * torch.randn(size=(bins_num + 1,), device=device) - 1, requires_grad=False
-            ) if directed else None,
-            prior_c_sigma_s=torch.nn.Parameter(
-                2. * torch.randn(size=(nodes_num,), device=device) - 1,  requires_grad=False
-            ),
-            prior_c_sigma_r=torch.nn.Parameter(
-                2. * torch.randn(size=(nodes_num,), device=device) - 1, requires_grad=False
+            prior_sigma_r=torch.nn.Parameter(
+                torch.randn(size=((bins_num+1) * nodes_num * dim,), device=device), requires_grad=False
             ) if directed else None,
             directed=directed,
             signed=signed,

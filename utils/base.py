@@ -35,16 +35,6 @@ def div(x: torch.Tensor, y: float, decimals=6):
     return torch.round(torch.div(torch.round(x, decimals=decimals), y, ), decimals=decimals).type(torch.int)
 
 
-def vectorize(x: torch.Tensor):
-    """
-    Vectorize a tensor of shape (batch_size, n, m) to (batch_size, n * m)
-    :param x: A tensor of shape (batch_size, n, m)
-    :return: A tensor of shape (batch_size, n * m)
-    """
-
-    return x.flatten(-2)
-
-
 def standardize(x: torch.Tensor):
     """
     Standardize a tensor of shape (B, N, D)/(B, D) to (B, N, D)/ (B, D)

@@ -6,11 +6,9 @@ class BaseModel(torch.nn.Module):
     '''
     Description
     '''
-    def __init__(self, x0_s: torch.Tensor, v_s: torch.Tensor, beta_s: torch.Tensor, 
+    def __init__(self, x0_s: torch.Tensor, v_s: torch.Tensor, beta_s: torch.Tensor, prior_sigma_s: torch.Tensor = None,
                 directed: bool = False, signed: bool = False, prior_lambda: float = 1.0,
-                prior_b_sigma_s: torch.Tensor = None, prior_c_sigma_s: torch.Tensor = None,
-                x0_r: torch.Tensor = None, v_r: torch.Tensor = None, beta_r: torch.Tensor = None,
-                prior_b_sigma_r: torch.Tensor = None, prior_c_sigma_r: torch.Tensor = None,
+                x0_r: torch.Tensor = None, v_r: torch.Tensor = None, beta_r: torch.Tensor = None, prior_sigma_r: torch.Tensor = None,
                 device: torch.device = "cpu", verbose: bool = False, seed: int = 19):
 
         super(BaseModel, self).__init__()
@@ -37,10 +35,8 @@ class BaseModel(torch.nn.Module):
 
         # Set the model hyperparameters
         self.__prior_lambda = prior_lambda
-        self.__prior_b_sigma_s = prior_b_sigma_s
-        self.__prior_b_sigma_r = prior_b_sigma_r
-        self.__prior_c_sigma_s = prior_c_sigma_s
-        self.__prior_c_sigma_r = prior_c_sigma_r
+        self.__prior_sigma_s = prior_sigma_s
+        self.__prior_sigma_r = prior_sigma_r
 
         self.__device = device
         self.__verbose = verbose
@@ -187,29 +183,17 @@ class BaseModel(torch.nn.Module):
         """
         return self.__prior_lambda
 
-    def get_prior_b_sigma_s(self):
+    def get_prior_sigma_s(self):
         """
-        Returns the diagonal elements of the B matrix of the source nodes for the covariance of the prior distribution
+        Returns the diagonal elements of the source nodes for the covariance of the prior distribution
         """
-        return self.__prior_b_sigma_s
+        return self.__prior_sigma_s
 
-    def get_prior_b_sigma_r(self):
+    def get_prior_sigma_r(self):
         """
-        Returns the diagonal elements of the B matrix of the receiver nodes for the covariance of the prior distribution
+        Returns the diagonal elements of the receiver nodes for the covariance of the prior distribution
         """
-        return self.__prior_b_sigma_r
-
-    def get_prior_c_sigma_s(self):
-        """
-        Returns the diagonal elements of the C matrix of the source nodes for the covariance of the prior distribution
-        """
-        return self.__prior_c_sigma_s
-
-    def get_prior_c_sigma_r(self):
-        """
-        Returns the diagonal elements of the C matrix of the receiver nodes for the covariance of the prior distribution
-        """
-        return self.__prior_c_sigma_r
+        return self.__prior_sigma_r
 
     def get_bin_bounds(self):
         '''
@@ -611,24 +595,25 @@ class BaseModel(torch.nn.Module):
 
         # Normalize and vectorize the initial position and velocity vectors
         x0_s = torch.index_select(self.get_x0_s(), dim=0, index=nodes).flatten() 
-        v_s = utils.vectorize(torch.index_select(self.get_v_s(),  dim=1, index=nodes)).flatten()
+        v_s = torch.index_select(self.get_v_s(),  dim=1, index=nodes).flatten()
         x0v_s = torch.hstack((x0_s, v_s))
         if self.is_directed():
             x0_r = torch.index_select(self.get_x0_r(), dim=0, index=nodes).flatten() 
-            v_r = utils.vectorize(torch.index_select(self.get_v_r(),  dim=1, index=nodes)).flatten()
+            v_r = torch.index_select(self.get_v_r(),  dim=1, index=nodes).flatten()
             x0v_r = torch.hstack((x0_r, v_r))
 
         # Compute the negative log-likelihood
-        d_s = torch.kron(
-            self.get_prior_b_sigma_s()**2, torch.index_select(self.get_prior_c_sigma_s(), index=nodes, dim=0)**2
-        )
-        d_s = torch.kron(d_s, torch.ones(self.get_dim(), device=self.get_device(), dtype=torch.float))
+        d_s = torch.softmax(self.get_prior_sigma_s()**2, dim=0)
+        d_s = torch.index_select(
+            d_s.reshape(self.get_bins_num()+1, self.get_nodes_num(), self.get_dim()), dim=1, index=nodes
+        ).flatten()
+
         log_prior_s = -0.5*(final_dim*utils.LOG2PI+final_dim*torch.log(lambda_sq)+(1./lambda_sq)*(x0v_s**2 @ d_s))
         if self.is_directed():
-            d_r = torch.kron(
-                self.get_prior_b_sigma_r()**2, torch.index_select(self.get_prior_c_sigma_r(), index=nodes, dim=0)**2
-            )
-            d_r = torch.kron(d_r, torch.ones(self.get_dim(), device=self.get_device(), dtype=torch.float))
+            d_r = torch.softmax(self.get_prior_sigma_r() ** 2, dim=0)
+            d_r = torch.index_select(
+                d_r.reshape(self.get_bins_num() + 1, self.get_nodes_num(), self.get_dim()), dim=1, index=nodes
+            ).flatten()
             log_prior_r = -0.5*(final_dim*utils.LOG2PI+final_dim*torch.log(lambda_sq)+(1./lambda_sq)*(x0v_r**2 @ d_r))
 
         neg_log_prior = log_prior_s
