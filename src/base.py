@@ -604,17 +604,17 @@ class BaseModel(torch.nn.Module):
 
         # Compute the negative log-likelihood
         d_s = torch.softmax(self.get_prior_sigma_s()**2, dim=0)
-        d_s = torch.index_select(
+        d_s = lambda_sq * torch.index_select(
             d_s.reshape(self.get_bins_num()+1, self.get_nodes_num(), self.get_dim()), dim=1, index=nodes
         ).flatten()
 
-        log_prior_s = -0.5*(final_dim*utils.LOG2PI+final_dim*torch.log(lambda_sq)+(1./lambda_sq)*(x0v_s**2 @ d_s))
+        log_prior_s = -0.5*(final_dim*utils.LOG2PI+torch.log(d_s).sum()+(x0v_s**2 @ (1. / d_s)))
         if self.is_directed():
             d_r = torch.softmax(self.get_prior_sigma_r() ** 2, dim=0)
-            d_r = torch.index_select(
+            d_r = lambda_sq * torch.index_select(
                 d_r.reshape(self.get_bins_num() + 1, self.get_nodes_num(), self.get_dim()), dim=1, index=nodes
             ).flatten()
-            log_prior_r = -0.5*(final_dim*utils.LOG2PI+final_dim*torch.log(lambda_sq)+(1./lambda_sq)*(x0v_r**2 @ d_r))
+            log_prior_r = -0.5*(final_dim*utils.LOG2PI+torch.log(d_r).sum()+(x0v_s**2 @ (1. / d_r)))
 
         neg_log_prior = log_prior_s
         if self.is_directed():
