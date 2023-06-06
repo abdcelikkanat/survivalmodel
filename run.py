@@ -97,6 +97,7 @@ def process(parser):
         # Load the model if exists
         kwargs, lm_state = torch.load(parser.init_model, map_location=torch.device(parser.device))
         # Update the arguments
+        kwargs['prior_lambda'] = parser.prior_lambda
         kwargs['seed'], kwargs['device'], kwargs['verbose'] = parser.seed, parser.device, parser.verbose
 
         # Load the model
