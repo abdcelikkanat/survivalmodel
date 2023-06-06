@@ -1,10 +1,9 @@
 import os
-from argparse import ArgumentParser, RawTextHelpFormatter
-from utils.common import set_seed, flatIdx2matIdx, matIdx2flatIdx
-import numpy as np
-from src.dataset import Dataset
 import pickle
-
+import torch
+from src.dataset import Dataset
+from argparse import ArgumentParser, RawTextHelpFormatter
+from utils.common import set_seed
 
 ########################################################################################################################
 
@@ -53,34 +52,32 @@ del dataset
 def durations2samples(pos_durations, zero_durations, neg_durations, max_sample_size):
 
     # Construct the zero samples
-    zero_chosen_idx = np.random.choice(
-        len(zero_durations), size=(min(max_sample_size, len(zero_durations), len(pos_durations) + len(neg_durations)),),
-        replace=False
-    )
-    zero_pairs, zero_times, zero_labels = [], [], []
+    perm = torch.randperm(len(zero_durations))
+    zero_chosen_idx = perm[:min(max_sample_size, len(zero_durations), len(pos_durations) + len(neg_durations))].tolist()
+
+    zero_pairs, zero_intervals, zero_labels = [], [], []
     for idx in zero_chosen_idx:
         zero_pairs.append((zero_durations[idx][0], zero_durations[idx][1]))
-        zero_times.append((zero_durations[idx][2].item() + zero_durations[idx][3].item())/2)
+        zero_intervals.append((zero_durations[idx][2].item() + zero_durations[idx][3].item())/2)
         zero_labels.append(zero_durations[idx][4])
 
-    pos_pairs, pos_times, pos_labels = [], [], []
+    pos_pairs, pos_intervals, pos_labels = [], [], []
     for idx in range(len(pos_durations)):
         pos_pairs.append((pos_durations[idx][0], pos_durations[idx][1]))
-        pos_times.append((pos_durations[idx][2].item() + pos_durations[idx][3].item())/2)
+        pos_intervals.append((pos_durations[idx][2].item() + pos_durations[idx][3].item())/2)
         pos_labels.append(pos_durations[idx][4])
 
-    neg_pairs, neg_times, neg_labels = [], [], []
+    neg_pairs, neg_intervals, neg_labels = [], [], []
     for idx in range(len(neg_durations)):
         neg_pairs.append((neg_durations[idx][0], neg_durations[idx][1]))
-        neg_times.append((neg_durations[idx][2].item() + neg_durations[idx][3].item())/2)
+        neg_intervals.append((neg_durations[idx][2].item() + neg_durations[idx][3].item())/2)
         neg_labels.append(neg_durations[idx][4])
 
-    samples = {'zero': {'pairs': zero_pairs, 'times': zero_times, 'labels': zero_labels},
-               'pos': {'pairs': pos_pairs, 'times': pos_times, 'labels': pos_labels},
-               'neg': {'pairs': neg_pairs, 'times': neg_times, 'labels': neg_labels}}
+    samples = {'zero': {'pairs': zero_pairs, 'intervals': zero_intervals, 'labels': zero_labels},
+               'pos': {'pairs': pos_pairs, 'intervals': pos_intervals, 'labels': pos_labels},
+               'neg': {'pairs': neg_pairs, 'intervals': neg_intervals, 'labels': neg_labels}}
 
     return samples
-
 
 def get_durations(data_dict, directed, nodes_num, init_time, last_time):
     """
