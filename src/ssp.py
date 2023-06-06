@@ -2,7 +2,7 @@ import torch
 import utils
 
 
-class SurviveDieProcess:
+class SequentialSurviveProcess:
 
     def __init__(self, lambda_func, initial_state: int, critical_points: list, seed: int = 19):
 

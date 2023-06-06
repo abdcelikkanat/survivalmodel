@@ -91,10 +91,11 @@ def process(parser):
     directed = kwargs['directed']
     signed = kwargs['signed']
 
+    # Get the initial and last time
     init_time = dataset.get_init_time()
     last_time = dataset.get_last_time()
-    ####
 
+    # Define the frame times and nodes
     frame_times = torch.linspace(init_time, last_time, steps=parser.frames_num)
     nodes = torch.arange(nodes_num).unsqueeze(1).expand(nodes_num, parser.frames_num)
     time_list = frame_times.unsqueeze(0).expand(nodes_num, parser.frames_num)

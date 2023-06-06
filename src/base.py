@@ -228,7 +228,7 @@ class BaseModel(torch.nn.Module):
 
         :param time_list: a vector of shape L
         :return: an index and residual vectors of of shapes L
-        '"""
+        """
 
          # Compute the bin indices of the given time points
         bin_indices = utils.div(time_list, self.get_bin_width()).type(torch.long)
@@ -238,13 +238,12 @@ class BaseModel(torch.nn.Module):
         return bin_indices
 
     def get_residual(self, time_list: torch.Tensor, bin_indices: torch.Tensor):
-
-        '''
+        """
         Computes the residuals of given times
 
         :param time_list: a vector of shape L
         :return: an index and residual vectors of of shapes L
-        '''
+        """
 
         # Compute the residual times
         residual_time = utils.remainder(time_list, self.get_bin_width())
@@ -254,13 +253,13 @@ class BaseModel(torch.nn.Module):
         return residual_time
 
     def get_rt_s(self, time_list: torch.Tensor, nodes: torch.Tensor, standardize: bool = True) -> torch.Tensor:
-        '''
+        """
         Computes the locations at given times based on the initial position and velocity tensors.
         
         :param time_list: a vector of shape L
         :param nodes: a vector of shape L
         :return: A matrix of shape L X D
-        '''
+        """
 
         # Compute the bin indices and residul times of the given time points
         bin_indices = self.get_bin_index(time_list=time_list)
@@ -278,13 +277,13 @@ class BaseModel(torch.nn.Module):
         return rt
 
     def get_rt_r(self, time_list: torch.Tensor, nodes: torch.Tensor, standardize: bool = True) -> torch.Tensor:
-        '''
+        """
         Computes the locations at given times based on the initial position and velocity tensors.
         
         :param time_list: a vector of shape L
         :param nodes: a vector of shape L
         :return: A matrix of shape L X D
-        '''
+        """
 
         # Compute the bin indices and residul times of the given time points
         bin_indices = self.get_bin_index(time_list=time_list)
@@ -302,14 +301,14 @@ class BaseModel(torch.nn.Module):
         return rt
 
     def get_beta_ij(self, pairs: torch.Tensor, pair_states: torch.Tensor) -> torch.Tensor:
-        '''
+        """
         Computes the sum of the beta elements for given pair and states
 
         :param time_list: a vector of shape L
         :param pairs: a vector of shape 2 x L
         :param states: a vector of shape L
         :return: A vector of shape L
-        '''
+        """
 
         beta_s = self.get_beta_s()
         beta_r = self.get_beta_r() if self.is_directed() else beta_s
@@ -317,14 +316,14 @@ class BaseModel(torch.nn.Module):
         return beta_s[pairs[0], pair_states] + beta_r[pairs[1], pair_states]
 
     def get_delta_v(self, bin_indices: torch.Tensor, pairs: torch.Tensor, standardize: bool = True) -> torch.Tensor:
-        '''
+        """
         Computes the velocity diffrences for given bin indices and pairs.
         
         :param bin_indices: a vector of shape L
         :param pairs: a vector of shape 2 x L
         :param standardize: a boolean parameter to set the standardization of velocity vectors
         :return: A matrix of shape L X D
-        '''
+        """
 
         v_s = self.get_v_s(standardize=standardize)
         v_r = self.get_v_r(standardize=standardize) if self.is_directed() else v_s
@@ -332,14 +331,14 @@ class BaseModel(torch.nn.Module):
         return v_s[bin_indices, pairs[0], :] - v_r[bin_indices, pairs[1], :]
 
     def get_delta_rt(self, time_list: torch.Tensor, pairs: torch.Tensor, standardize: bool = True) -> torch.Tensor:
-        '''
+        """
         Computes the locations at given times based on the initial position and velocity tensors.
         
         :param time_list: a vector of shape L
         :param pairs: a vector of shape 2 x L
         :param standardize: a boolean parameter to set the standardization of the initial position and velocity vectors
         :return: A matrix of shape L X D
-        '''
+        """
         # Compute the bin indices and residul times of the given time points
         bin_indices = self.get_bin_index(time_list=time_list)
         residual_time = self.get_residual(time_list=time_list, bin_indices=bin_indices)
@@ -402,13 +401,13 @@ class BaseModel(torch.nn.Module):
         return intensity
 
     def get_intensity_at(self, time_list: torch.Tensor, edges: torch.Tensor, edge_states: torch.Tensor) -> torch.Tensor:
-        '''
+        """
         Computes the intenstiy function for given times and pairs
 
         :param time_list: a vector of shape L
         :param pairs: a vector of shape 2 x L
         :return: A vector of shape L
-        '''
+        """
         return torch.exp(self.get_log_intensity_at(time_list=time_list, edges=edges, edge_states=edge_states))
 
     def get_intensity_integral(self, time_list: torch.Tensor, pairs: torch.Tensor, delta_t: torch.Tensor,
@@ -631,7 +630,7 @@ class BaseModel(torch.nn.Module):
                     torch.ones(self.get_dim(), device=self.get_device(), dtype=torch.float)
                 )
             )
-            log_prior_r = -0.5*(final_dim*utils.LOG2PI+torch.log(d_r).sum()+(x0v_s**2 @ (1. / d_r)))
+            log_prior_r = -0.5*(final_dim*utils.LOG2PI+torch.log(d_r).sum()+(x0v_r**2 @ (1. / d_r)))
 
         neg_log_prior = log_prior_s
         if self.is_directed():

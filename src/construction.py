@@ -1,18 +1,17 @@
-import os
 import torch
 import utils
-import pickle as pkl
-from src.sdp import SurviveDieProcess
+from src.ssp import SequentialSurviveProcess
 from src.base import BaseModel
-from utils import prior
+from src.dataset import Dataset
+from src.animation import Animation
 
 
 class ConstructionModel(torch.nn.Module):
 
-    def __init__(self, cluster_sizes: list, bins_num: int, dim: int, directed: bool,
-                prior_lambda: float, prior_sigma_s: float, prior_sigma_r: float, beta_s: torch.Tensor, beta_r: torch.Tensor,
-                prior_B_x0_logit_c_s: float, prior_B_x0_logit_c_r: float, prior_B_ls_s: float, prior_B_ls_r: float,
-                device: torch.device = "cpu", verbose: bool = False, seed: int = 0):
+    def __init__(self, cluster_sizes: list, bins_num: int, dim: int, directed: bool, prior_lambda: float,
+                 prior_sigma_s: float, prior_sigma_r: float, beta_s: list, beta_r: list,
+                 prior_B_x0_logit_c_s: float, prior_B_x0_logit_c_r: float, prior_B_ls_s: float, prior_B_ls_r: float,
+                 device: torch.device = "cpu", verbose: bool = False, seed: int = 0):
 
         super(ConstructionModel, self).__init__()
 
@@ -23,31 +22,31 @@ class ConstructionModel(torch.nn.Module):
         self.__dim = dim
         self.__bins_num = bins_num
         self.__directed = directed
+        self.__signed = False
 
         # Sample the bias tensors
-        if type(beta_s) is torch.Tensor:
-            self.__beta_s = torch.as_tensor(beta_s, dtype=torch.float, device=device)
-        else:
-            print("Sampling beta_s...")
-            self.__beta_s = torch.vstack((
-                beta_s[0] * torch.ones(size=(self.__nodes_num, ), dtype=torch.float, device=device),
-                beta_s[1] * torch.ones(size=(self.__nodes_num, ), dtype=torch.float, device=device)
-            )).T
-        if type(beta_r) is torch.Tensor:
-            self.__beta_r = torch.as_tensor(beta_r, dtype=torch.float, device=device) if self.__directed else None
-        else:
+        self.__beta_s = torch.vstack((
+            beta_s[0] * torch.ones(size=(self.__nodes_num, ), dtype=torch.float, device=device),
+            beta_s[1] * torch.ones(size=(self.__nodes_num, ), dtype=torch.float, device=device)
+        )).T
+        self.__beta_r = None
+
+        # Set the prior hyper-parameters
+        self.__prior_lambda = prior_lambda
+        self.__prior_sigma_s = torch.as_tensor(prior_sigma_s, dtype=torch.float, device=device)
+        self.__prior_sigma_r = None
+        self.__prior_B_x0_logit_c_s = torch.as_tensor(prior_B_x0_logit_c_s, dtype=torch.float, device=device)
+        self.__prior_B_x0_logit_c_r = None
+        self.__prior_B_ls_s = torch.as_tensor(prior_B_ls_s, dtype=torch.float, device=device)
+        self.__prior_B_ls_r = None
+        if self.__directed:
             self.__beta_r = torch.vstack((
                 beta_r[0] * torch.ones(size=(self.__nodes_num, 1), dtype=torch.float, device=device),
                 beta_r[1] * torch.ones(size=(self.__nodes_num, 1), dtype=torch.float, device=device)
-            )).T if self.__directed else None
-        # Set the prior hyper-parameters
-        self.__prior_lambda = torch.as_tensor(prior_lambda, dtype=torch.float, device=device)
-        self.__prior_sigma_s = torch.as_tensor(prior_sigma_s, dtype=torch.float, device=device)
-        self.__prior_sigma_r = torch.as_tensor(prior_sigma_r, dtype=torch.float, device=device) if self.__directed else None
-        self.__prior_B_x0_logit_c_s = torch.as_tensor(prior_B_x0_logit_c_s, dtype=torch.float, device=device)
-        self.__prior_B_x0_logit_c_r = torch.as_tensor(prior_B_x0_logit_c_r, dtype=torch.float, device=device) if self.__directed else None
-        self.__prior_B_ls_s = torch.as_tensor(prior_B_ls_s, dtype=torch.float, device=device)
-        self.__prior_B_ls_r = torch.as_tensor(prior_B_ls_r, dtype=torch.float, device=device) if self.__directed else None
+            )).T
+            self.__prior_sigma_r = torch.as_tensor(prior_sigma_r, dtype=torch.float, device=device)
+            self.__prior_B_ls_r = torch.as_tensor(prior_B_ls_r, dtype=torch.float, device=device)
+            self.__prior_B_x0_logit_c_r = torch.as_tensor(prior_B_x0_logit_c_r, dtype=torch.float, device=device)
 
         # Construct the Q matrix for the node matrix C, (nodes)
         self.__prior_C_Q_s = -utils.INF * torch.ones(size=(self.__nodes_num, self.__k), dtype=torch.float)
@@ -55,83 +54,69 @@ class ConstructionModel(torch.nn.Module):
             self.__prior_C_Q_s[sum(self.__cluster_sizes[:k]):sum(self.__cluster_sizes[:k + 1]), k] = 0
         self.__prior_C_Q_r = self.__prior_C_Q_s if self.__directed else None
 
-        #
+        # Set the device, verbose and seed
         self.__device = device
         self.__verbose = verbose
         self.__seed = seed
-
-        #
-        self.__bm = None
-        self.__data = None
 
         # Set the seed
         utils.set_seed(self.__seed)
 
         # Sample a graph
-        self.__bm, self.__data = self.sample_graph()
+        self.__bm, self.__dataset = self.sample_graph()
 
     def sample_graph(self):
-        '''
-        Sample a new graph
-        '''
-
-        # Constuct the node pairs
-        node_pairs = torch.as_tensor(
-            list(utils.pair_iter(n=self.__nodes_num, is_directed=self.__directed)),
-            dtype=torch.long, device=self.__device
-        ).T
+        """
+        Sample a graph
+        """
 
         # Sample the initial position and velocity tensors
         x0_s, v_s, x0_r, v_r = self.sample_x0_and_v()
 
+        # Define the model
         bm = BaseModel(
             x0_s=x0_s, v_s=v_s, beta_s=self.__beta_s,
             directed=self.__directed, prior_lambda=self.__prior_lambda,
-            prior_sigma_s=self.__prior_sigma_s, prior_B_x0_logit_c_s=self.__prior_B_x0_logit_c_s,
-            prior_B_ls_s=self.__prior_B_ls_s, prior_C_Q_s=self.__prior_C_Q_s, prior_R_factor_inv_s = None,
-            x0_r = x0_r, v_r = v_r, beta_r = self.__beta_r,
-            prior_sigma_r=self.__prior_sigma_r, prior_B_x0_logit_c_r=self.__prior_B_x0_logit_c_r,
-            prior_B_ls_r=self.__prior_B_ls_r, prior_C_Q_r=self.__prior_C_Q_r,  prior_R_factor_inv_r = None,
-            device=self.__device, verbose = self.__verbose, seed=self.__seed
+            x0_r = x0_r, v_r = v_r, beta_r=self.__beta_r,
+            device=self.__device, verbose=self.__verbose, seed=self.__seed
+        )
+        # Sample the events and states for each pair
+        edges, edge_times, edge_states = self.sample_events(bm=bm)
+
+        # Construct the dataset
+        dataset = Dataset(
+            nodes_num=self.__nodes_num,
+            edges=torch.as_tensor(edges, dtype=torch.long, device=self.__device).T,
+            edge_times=((1. / utils.EPS) * torch.as_tensor(edge_times, device=self.__device)).to(torch.long),
+            edge_weights=torch.as_tensor(edge_states, device=self.__device, dtype=torch.long),
+            directed=self.__directed, signed=self.__signed
         )
 
-        pair_events, pair_states = self.__sample_events(bm=bm, node_pairs=node_pairs)
-
-        triplets = [
-            (tuple(pair), event, state) for pair in node_pairs.T.tolist()
-            for event, state in zip(pair_events[(pair[0], pair[1])], pair_states[(pair[0], pair[1])])
-        ]
-        pairs, events, states = zip(*sorted(triplets, key=lambda tri: tri[1]))
-        # Convert the times to unix timestamps
-        events = (torch.as_tensor(events, dtype=torch.float) * (1. / utils.EPS)).to(torch.long) #events = (torch.as_tensor(events, dtype=torch.float)*86400*1e6).to(torch.long)
-        # events = torch.as_tensor(events, dtype=torch.float)
-        # min_diff = (events[1:] - events[:-1]).abs().min()
-        # events = ((1. / min_diff) * events).to(torch.long)
-        # min_time = events.min()
-        # max_time = events.max()
-        data = list(pairs), events, torch.as_tensor(states, dtype=torch.int8), self.__directed, -1, -1
-
-        return bm, data
+        return bm, dataset
 
     def sample_x0_and_v(self):
-        '''
+        """
         Sample the initial position and velocity of the nodes
         For directed graphs, B matrix (bins) are only different
-
-        '''
+        """
 
         # Define the bin centers
-        bin_centers = torch.arange(0.5/self.__bins_num, 1.0, 1.0/self.__bins_num).unsqueeze(0)
+        bin_centers = torch.arange(0.5/self.__bins_num, 1.0, 1.0/self.__bins_num, device=self.__device).unsqueeze(0)
 
         # Define the final dimension size
-        final_dim = self.__nodes_num * (self.__bins_num+1) * self.__dim
+        final_dim = (self.__bins_num+1) * self.__nodes_num * self.__dim
 
         # Construct the factor of B matrix (bins)
-        B_factor_s = prior.get_B_factor(bin_centers, bin_centers, torch.sigmoid(self.__prior_B_x0_logit_c_s), self.__prior_B_ls_s)
+        B_factor_s = torch.linalg.cholesky(
+            utils.EPS*torch.eye(self.__bins_num+1, device=self.__device) + torch.block_diag(
+                torch.sigmoid(self.__prior_B_x0_logit_c_s)**2,
+                torch.exp(-((bin_centers - bin_centers.T)**2 / (2.0*(self.__prior_B_ls_s**2))))
+            )
+        )
         # Construct the factor of C matrix (nodes)
-        C_factor_s = prior.get_C_factor(self.__prior_C_Q_s)
+        C_factor_s = torch.softmax(self.__prior_C_Q_s, dim=1)
         # Get the factor of D matrix, (dimension)
-        D_factor_s = prior.get_D_factor(dim=self.__dim)
+        D_factor_s = torch.eye(self.__dim, device=self.__device)
 
         # Sample from the low rank multivariate normal distribution
         # covariance_matrix = cov_factor @ cov_factor.T + cov_diag
@@ -153,11 +138,16 @@ class ConstructionModel(torch.nn.Module):
         if self.__directed:
 
             # Construct the factor of B matrix (bins)
-            B_factor_r = prior.get_B_factor(bin_centers, bin_centers, torch.sigmoid(self.__prior_B_x0_logit_c_r), self.__prior_B_ls_r)
+            B_factor_r = torch.linalg.cholesky(
+                utils.EPS*torch.eye(self.__bins_num+1, device=self.__device) + torch.block_diag(
+                    torch.sigmoid(self.__prior_B_x0_logit_c_r)**2,
+                    torch.exp(-((bin_centers - bin_centers.T)**2 / (2.0*(self.__prior_B_ls_r**2))))
+                )
+            )
             # Construct the factor of C matrix (nodes)
-            C_factor_r = prior.get_C_factor(self.__prior_C_Q_r)
+            C_factor_r = torch.softmax(self.__prior_C_Q_r, dim=1)
             # Get the factor of D matrix, (dimension)
-            D_factor_r = prior.get_D_factor(dim=self.__dim)
+            D_factor_r = torch.eye(self.__dim, device=self.__device)
 
             # Sample from the low rank multivariate normal distribution
             # covariance_matrix = cov_factor @ cov_factor.T + cov_diag
@@ -179,26 +169,14 @@ class ConstructionModel(torch.nn.Module):
         else:
             x0_r, v_r = None, None
 
-        # ########################################################################################
-        # from torch.distributions.multivariate_normal import MultivariateNormal
-        # loc = torch.as_tensor([-1.0, 0.0])
-        # scale =0.1* torch.ones(2)
-        # mvn = MultivariateNormal(loc=loc, scale_tril=torch.diag(scale))
-        # x0_s = mvn.sample((self.__nodes_num//2, ) )
-        # loc = torch.as_tensor([+1.0, 0.0])
-        # scale = 0.1 * torch.ones(2)
-        # mvn = MultivariateNormal(loc=loc, scale_tril=torch.diag(scale))
-        # x0_s = torch.vstack((x0_s, mvn.sample((self.__nodes_num//2,))))
-        # v_s = torch.zeros(size=(self.__bins_num, self.__nodes_num, self.__dim))
-        # ########################################################################################
-
         return utils.standardize(x0_s), utils.standardize(v_s), utils.standardize(x0_r), utils.standardize(v_r)
 
-    def __sample_events(self, node_pairs: torch.Tensor, bm: BaseModel) -> tuple[dict, dict]:
-
-        # Construct a dictionary of dictionaries to store the events times
-        pair_events = {tuple(pair): [] for pair in node_pairs.T.tolist()}
-        pair_states = {tuple(pair): [] for pair in node_pairs.T.tolist()}
+    def sample_events(self, bm: BaseModel) -> tuple[list, list, list]:
+        """
+        Sample the events from the Hawkes process
+        :param bm: BaseModel object
+        :return: list of edges, event times and states
+        """
 
         # Get the positions at the beginning of each time bin for every node
         rt_s = bm.get_rt_s(
@@ -213,18 +191,21 @@ class ConstructionModel(torch.nn.Module):
         else:
             rt_r = rt_s
 
-        for pair in node_pairs.T:
-
-            i, j = pair
+        edges, edge_times, edge_states = [], [], []
+        for i, j in utils.pair_iter(self.__nodes_num, self.__directed):
 
             # Define the intensity function for each node pair (i,j)
             intensity_func = lambda t, state: bm.get_intensity_at(
-                time_list=torch.as_tensor([t]), edges=pair.unsqueeze(1),
+                time_list=torch.as_tensor([t], dtype=torch.float, device=self.__device),
+                edges=torch.as_tensor([[i], [j]], dtype=torch.long, device=self.__device),
                 edge_states=torch.as_tensor([state], dtype=torch.long, device=self.__device)
             ).item()
 
             # Get the flat index of the pair
-            flat_idx = utils.matIdx2flatIdx(i, j, self.__nodes_num, is_directed=self.__directed)
+            flat_idx = utils.matIdx2flatIdx(
+                torch.as_tensor([i], dtype=torch.long), torch.as_tensor([j], dtype=torch.long),
+                self.__nodes_num, is_directed=self.__directed
+            )
 
             # Get the critical points
             v_s = bm.get_v_s()
@@ -234,20 +215,18 @@ class ConstructionModel(torch.nn.Module):
             )
 
             # Simulate the Survive or Die Process
-            nhpp_ij = SurviveDieProcess(
+            nhpp_ij = SequentialSurviveProcess(
                 lambda_func=intensity_func, initial_state=0, critical_points=critical_points,
                 seed=self.__seed + flat_idx
             )
             ij_edge_times, ij_edge_states = nhpp_ij.simulate()
-            # Add the event times
-            pair_events[(i.item(), j.item())].extend(ij_edge_times)
-            pair_states[(i.item(), j.item())].extend(ij_edge_states)
 
-            # if i == 8 and j == 32:
-            #     print( ij_edge_times, self.__seed + flat_idx )
-            #     raise Exception
+            # Add edges, edge times and edge states to the list
+            edges.extend([[i, j]]*len(ij_edge_times))
+            edge_times.extend(ij_edge_times)
+            edge_states.extend(ij_edge_states)
 
-        return pair_events, pair_states
+        return edges, edge_times, edge_states
 
     def __get_critical_points(self, i: int, j: int, bin_bounds: torch.Tensor,
                               rt_s: torch.Tensor, rt_r: torch.Tensor, v_s: torch.Tensor, v_r: torch.Tensor) -> list:
@@ -279,31 +258,97 @@ class ConstructionModel(torch.nn.Module):
 
         return critical_points
 
-    def get_data(self):
-
-        return self.__data
-
     def get_model(self):
 
         return self.__bm
 
-    def save_data(self, file_path: str):
-
-        with open(file_path, 'wb') as f:
-            pkl.dump(self.__data, f)
-
     def save_model(self, file_path: str):
+        """
+        Save the model
+        :param file_path: the path to the file
+        """
 
-        with open(file_path, 'wb') as f:
-            pkl.dump(self.__bm, f)
+        kwargs = {
+            'x0_s': self.__bm.get_x0_s(),
+            'v_s': self.__bm.get_v_s(),
+            'beta_s': self.__bm.get_beta_s(),
+            'directed': self.__bm.is_directed(),
+            'signed': self.__bm.is_signed(),
+            'prior_lambda': self.__bm.get_prior_lambda(),
+            'prior_b_sigma_s': self.__bm.get_prior_b_sigma_s(),
+            'prior_b_sigma_r': self.__bm.get_prior_b_sigma_r(),
+            'x0_r': self.__bm.get_x0_r(),
+            'v_r': self.__bm.get_v_r(),
+            'beta_r': self.__bm.get_beta_r(),
+            'prior_c_sigma_s': self.__bm.get_prior_c_sigma_s(),
+            'prior_c_sigma_r': self.__bm.get_prior_c_sigma_r(),
+            'device': self.__bm.get_device(),
+            'verbose': self.__bm.get_verbose(),
+            'seed': self.__bm.get_seed()
+        }
+        torch.save(kwargs, file_path)
 
     def write_edges(self, file_path: str):
-        '''
+        """
         Write the edges
         :param file_path: the path to the file
-        :param max_range: the maximum range of the time
-        '''
+        """
+
+        self.__dataset.write_edges(file_path, weights=True)
+
+    def write_info(self, file_path: str):
+        """
+        Write the info
+        :param file_path: the path to the file
+        """
 
         with open(file_path, 'w') as f:
-            for pair, event_time, state in zip(self.__data[0], self.__data[1], self.__data[2]):
-                f.write(f"{pair[0]} {pair[1]} {event_time} {state}\n")
+            f.write(f"Nodes num: {self.__nodes_num}\n")
+            f.write(f"Clusters num: {self.__k}\n")
+            f.write(f"Dimension: {self.__dim}\n")
+            f.write(f"Bins num: {self.__bins_num}\n")
+            f.write(f"Directed: {self.__directed}\n")
+            f.write(f"Signed: {self.__signed}\n")
+            f.write(f"Prior lambda: {self.__prior_lambda}\n")
+            f.write(f"Prior sigma_s: {self.__prior_sigma_s}\n")
+            f.write(f"Prior sigma_r: {self.__prior_sigma_r}\n")
+            f.write(f"Prior B_x0_logit_c_s: {self.__prior_B_x0_logit_c_s}\n")
+            f.write(f"Prior B_x0_logit_c_r: {self.__prior_B_x0_logit_c_r}\n")
+            f.write(f"Prior B_ls_s: {self.__prior_B_ls_s}\n")
+            f.write(f"Prior B_ls_r: {self.__prior_B_ls_r}\n")
+            f.write(f"Prior C Q_s:\n{self.__prior_C_Q_s}\n")
+            f.write(f"Prior C Q_r:\n{self.__prior_C_Q_r}\n")
+            f.write(f"Beta_s:\n{self.__beta_s}\n")
+            f.write(f"Beta_r:\n{self.__beta_r}\n")
+            f.write(f"Device: {self.__device}\n")
+            f.write(f"Verbose: {self.__verbose}\n")
+            f.write(f"Seed: {self.__seed}\n")
+
+    def save_animation(self, file_path, frames_num = 100):
+        """
+        Save the animation
+        :param file_path: the path to the file
+        """
+
+        # Get the initial and last time
+        init_time = self.__dataset.get_init_time()
+        last_time = self.__dataset.get_last_time()
+        nodes_num = self.__dataset.get_nodes_num()
+
+        # Define the frame times and nodes
+        frame_times = torch.linspace(init_time, last_time, steps=frames_num)
+        nodes = torch.arange(nodes_num).unsqueeze(1).expand(nodes_num, frames_num)
+        time_list = frame_times.unsqueeze(0).expand(nodes_num, frames_num)
+
+        rt_s = self.__bm.get_rt_s(
+            time_list=(time_list.flatten() - init_time) / float(last_time - init_time), nodes=nodes.flatten()
+        ).reshape(nodes_num, frames_num,  self.__dim).transpose(0, 1)
+        rt_r = self.__bm.get_rt_r(
+            time_list=(time_list.flatten() - init_time) / float(last_time - init_time), nodes=nodes.flatten()
+        ).reshape(nodes_num, frames_num, self.__dim).transpose(0, 1) if self.__directed else None
+
+        anim = Animation(
+            rt_s=rt_s, rt_r=rt_r, frame_times=frame_times,
+            data_dict=self.__dataset.get_data_dict(weights=True),
+        )
+        anim.save(file_path, format="mp4")

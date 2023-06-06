@@ -8,7 +8,7 @@ class Dataset:
     Version 2.0
     """
 
-    def __init__(self, nodes_num=0, edges: torch.LongTensor = None, edge_times: torch.Tensor = None,
+    def __init__(self, nodes_num=0, edges: torch.Tensor = None, edge_times: torch.Tensor = None,
                  edge_weights: torch.Tensor = None, directed: bool = None, signed: bool = None, verbose=False):
 
         self.__nodes_num = nodes_num
@@ -29,7 +29,7 @@ class Dataset:
             assert self.__edges.shape[0] == 2, \
                 "The edges must be a matrix of shape (2xT)!"
             assert self.__edges.shape[1] == self.__times.shape[0], \
-                f"The number of edges ({self.__edges.shape[1]}) and the length of edge times ({self.__times.shape[0]}) must match!"
+                f"The number of edges ({self.__edges.shape[1]}) must match with ({self.__times.shape[0]})!"
 
     def read_edge_list(self, file_path, self_loops: bool = False):
         """
@@ -213,6 +213,17 @@ class Dataset:
                 data_dict[i.item()] = {j.item(): [(t, w) if weights else t]}
 
         return data_dict
+
+    def write_edges(self, file_path, weights: bool = False):
+        """
+        Write the edges to a file
+        """
+        with open(file_path, 'w') as f:
+            for i, j, t, w in zip(self.get_edges(0), self.get_edges(1), self.get_times(), self.get_weights()):
+                if weights:
+                    f.write(f"{i.item()} {j.item()} {t.item()} {w.item()}\n")
+                else:
+                    f.write(f"{i.item()} {j.item()} {t.item()}\n")
 
     def print_info(self):
         """
