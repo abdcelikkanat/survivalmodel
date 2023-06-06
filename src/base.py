@@ -230,9 +230,9 @@ class BaseModel(torch.nn.Module):
         :return: an index and residual vectors of of shapes L
         """
 
-         # Compute the bin indices of the given time points
+        # Compute the bin indices of the given time points
         bin_indices = utils.div(time_list, self.get_bin_width()).type(torch.long)
-         # If there is a time equal to the last time, set its bin index to the last bin
+        # If there is a time equal to the last time, set its bin index to the last bin
         bin_indices[bin_indices == self.get_bins_num()] = self.get_bins_num() - 1
 
         return bin_indices
@@ -248,7 +248,7 @@ class BaseModel(torch.nn.Module):
         # Compute the residual times
         residual_time = utils.remainder(time_list, self.get_bin_width())
         # If there is a time equal to the last time, set its resiudal time to bin width
-        residual_time[bin_indices == self.get_bins_num()] = self.get_bin_width()
+        residual_time[time_list == self.__last_time] = self.get_bin_width()
 
         return residual_time
 
@@ -342,7 +342,7 @@ class BaseModel(torch.nn.Module):
         # Compute the bin indices and residul times of the given time points
         bin_indices = self.get_bin_index(time_list=time_list)
         residual_time = self.get_residual(time_list=time_list, bin_indices=bin_indices)
-        
+
         # Get the initial position and velocity vectors
         x0_s = self.get_x0_s(standardize=standardize)
         v_s = self.get_v_s(standardize=standardize)
