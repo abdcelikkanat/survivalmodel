@@ -237,7 +237,7 @@ class BaseModel(torch.nn.Module):
 
         return bin_indices
 
-    def get_residual(self, time_list: torch.Tensor, bin_indices: torch.Tensor):
+    def get_residual(self, time_list: torch.Tensor):
         """
         Computes the residuals of given times
 
@@ -247,7 +247,7 @@ class BaseModel(torch.nn.Module):
 
         # Compute the residual times
         residual_time = utils.remainder(time_list, self.get_bin_width())
-        # If there is a time equal to the last time, set its resiudal time to bin width
+        # If there is a time equal to the last time, set its residual time to bin width
         residual_time[time_list == self.__last_time] = self.get_bin_width()
 
         return residual_time
@@ -263,7 +263,7 @@ class BaseModel(torch.nn.Module):
 
         # Compute the bin indices and residul times of the given time points
         bin_indices = self.get_bin_index(time_list=time_list)
-        residual_time = self.get_residual(time_list=time_list, bin_indices=bin_indices)
+        residual_time = self.get_residual(time_list=time_list)
 
         # Get the initial position and velocity vectors
         x0 = self.get_x0_s(standardize=standardize)
@@ -341,7 +341,7 @@ class BaseModel(torch.nn.Module):
         """
         # Compute the bin indices and residul times of the given time points
         bin_indices = self.get_bin_index(time_list=time_list)
-        residual_time = self.get_residual(time_list=time_list, bin_indices=bin_indices)
+        residual_time = self.get_residual(time_list=time_list)
 
         # Get the initial position and velocity vectors
         x0_s = self.get_x0_s(standardize=standardize)
