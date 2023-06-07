@@ -25,10 +25,7 @@ class ConstructionModel(torch.nn.Module):
         self.__signed = False
 
         # Sample the bias tensors
-        self.__beta_s = torch.vstack((
-            beta_s[0] * torch.ones(size=(self.__nodes_num, ), dtype=torch.float, device=device),
-            beta_s[1] * torch.ones(size=(self.__nodes_num, ), dtype=torch.float, device=device)
-        )).T
+        self.__beta_s = torch.as_tensor(beta_s, dtype=torch.float, device=device)
         self.__beta_r = None
 
         # Set the prior hyper-parameters
@@ -40,10 +37,7 @@ class ConstructionModel(torch.nn.Module):
         self.__prior_B_ls_s = torch.as_tensor(prior_B_ls_s, dtype=torch.float, device=device)
         self.__prior_B_ls_r = None
         if self.__directed:
-            self.__beta_r = torch.vstack((
-                beta_r[0] * torch.ones(size=(self.__nodes_num, 1), dtype=torch.float, device=device),
-                beta_r[1] * torch.ones(size=(self.__nodes_num, 1), dtype=torch.float, device=device)
-            )).T
+            self.__beta_r = torch.as_tensor(beta_r, dtype=torch.float, device=device)
             self.__prior_sigma_r = torch.as_tensor(prior_sigma_r, dtype=torch.float, device=device)
             self.__prior_B_ls_r = torch.as_tensor(prior_B_ls_r, dtype=torch.float, device=device)
             self.__prior_B_x0_logit_c_r = torch.as_tensor(prior_B_x0_logit_c_r, dtype=torch.float, device=device)
@@ -77,7 +71,7 @@ class ConstructionModel(torch.nn.Module):
         bm = BaseModel(
             x0_s=x0_s, v_s=v_s, beta_s=self.__beta_s,
             directed=self.__directed, prior_lambda=self.__prior_lambda,
-            x0_r = x0_r, v_r = v_r, beta_r=self.__beta_r,
+            x0_r=x0_r, v_r=v_r, beta_r=self.__beta_r,
             device=self.__device, verbose=self.__verbose, seed=self.__seed
         )
         # Sample the events and states for each pair
