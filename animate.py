@@ -31,7 +31,7 @@ def parse_arguments():
         '--fps', type=int, required=False, default=12, help='Frame per second for the animation'
     )
     parser.add_argument(
-        '--axis_off', type=bool, required=False, default=True, help='Remove the axis of the animation'
+        '--axis_off', type=bool, required=False, default=True, help='Remove the axis of the animation',
     )
     parser.add_argument(
         '--padding', type=int, required=False, default=0, help='Padding for the animation'

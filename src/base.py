@@ -300,7 +300,7 @@ class BaseModel(torch.nn.Module):
         rt = rt + residual_time.view(-1, 1)*self.get_v_r(standardize=standardize)[bin_indices, nodes, :]
         return rt
 
-    def get_beta_ij(self, pairs: torch.Tensor, pair_states: torch.Tensor) -> torch.Tensor:
+    def get_beta_ij(self, pair_states: torch.Tensor) -> torch.Tensor:
         """
         Computes the sum of the beta elements for given pair and states
 
@@ -313,7 +313,7 @@ class BaseModel(torch.nn.Module):
         beta_s = self.get_beta_s()
         beta_r = self.get_beta_r() if self.is_directed() else beta_s
 
-        return beta_s[pairs[0], pair_states] + beta_r[pairs[1], pair_states]
+        return beta_s[pair_states] + beta_r[pair_states]
 
     def get_delta_v(self, bin_indices: torch.Tensor, pairs: torch.Tensor, standardize: bool = True) -> torch.Tensor:
         """
@@ -377,10 +377,10 @@ class BaseModel(torch.nn.Module):
         if self.is_signed():
 
             beta_ij_plus = self.get_beta_ij(
-                pairs=edges, pair_states=torch.ones(len(edge_states), dtype=torch.long, device=self.get_device())
+                pair_states=torch.ones(len(edge_states), dtype=torch.long, device=self.get_device())
             )
             beta_ij_neg = self.get_beta_ij(
-                pairs=edges, pair_states=torch.zeros(len(edge_states), dtype=torch.long, device=self.get_device())
+                pair_states=torch.zeros(len(edge_states), dtype=torch.long, device=self.get_device())
             )
 
             beta_ij_pm = (1 - (edge_states.absolute() - edge_states) / 2) * beta_ij_plus + \
@@ -392,7 +392,7 @@ class BaseModel(torch.nn.Module):
 
         else:
 
-            beta_ij = self.get_beta_ij(pairs=edges, pair_states=edge_states)
+            beta_ij = self.get_beta_ij(pair_states=edge_states)
 
             intensity = beta_ij + (2.*edge_states-1.) * torch.norm(
                 self.get_delta_rt(time_list=time_list, pairs=edges), p=2, dim=1, keepdim=False
@@ -431,12 +431,11 @@ class BaseModel(torch.nn.Module):
 
         # Compute the beta sums
         beta_ij_plus = self.get_beta_ij(
-            pairs=pairs, pair_states=torch.ones(len(states), dtype=torch.long, device=self.get_device())
+            pair_states=torch.ones(len(states), dtype=torch.long, device=self.get_device())
         )
         beta_ij_neg = self.get_beta_ij(
-            pairs=pairs, pair_states=torch.zeros(len(states), dtype=torch.long, device=self.get_device())
+            pair_states=torch.zeros(len(states), dtype=torch.long, device=self.get_device())
         )
-        # beta_ij = self.get_beta_ij(pairs=pairs, pair_states=states)
 
         norm_delta_r = torch.norm(delta_r, p=2, dim=1, keepdim=False)
         norm_delta_v = torch.norm(delta_v, p=2, dim=1, keepdim=False) + utils.EPS
@@ -523,14 +522,11 @@ class BaseModel(torch.nn.Module):
 
         # Compute the beta sums
         beta_ij_plus = self.get_beta_ij(
-            pairs=extended_pairs,
             pair_states=torch.ones(len(extended_states), dtype=torch.long, device=self.get_device())
         )
         beta_ij_neg = self.get_beta_ij(
-            pairs=extended_pairs,
             pair_states=torch.zeros(len(extended_states), dtype=torch.long, device=self.get_device())
         )
-        # beta_ij = self.get_beta_ij(pairs=pairs, pair_states=states)
 
         norm_delta_r = torch.norm(delta_r, p=2, dim=1, keepdim=False)
         norm_delta_v = torch.norm(delta_v, p=2, dim=1, keepdim=False) + utils.EPS

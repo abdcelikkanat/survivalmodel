@@ -28,25 +28,25 @@ class LearningModel(BaseModel, torch.nn.Module):
                 torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False
             ) if directed else None,
             beta_s=torch.nn.Parameter(
-                2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False
+                torch.zeros(size=(2, ), device=device), requires_grad=False
             ),
             beta_r=torch.nn.Parameter(
-                2 * torch.zeros(size=(nodes_num, 2), device=device), requires_grad=False
+                torch.zeros(size=(2, ), device=device), requires_grad=False
             ) if directed else None,
             prior_lambda=torch.as_tensor(
                 prior_lambda, dtype=torch.float, device=device
             ),
             prior_b_sigma_s=torch.nn.Parameter(
-                torch.randn(size=(bins_num+1, ), device=device), requires_grad=False
+                torch.ones(size=(bins_num+1, ), device=device), requires_grad=False
             ),
             prior_b_sigma_r=torch.nn.Parameter(
-                torch.randn(size=(bins_num + 1,), device=device), requires_grad=False
+                torch.ones(size=(bins_num + 1,), device=device), requires_grad=False
             ) if directed else None,
             prior_c_sigma_s=torch.nn.Parameter(
-                torch.randn(size=(nodes_num, ), device=device), requires_grad=False
+                torch.ones(size=(nodes_num, ), device=device), requires_grad=False
             ),
             prior_c_sigma_r=torch.nn.Parameter(
-                torch.randn(size=(nodes_num,), device=device), requires_grad=False
+                torch.ones(size=(nodes_num,), device=device), requires_grad=False
             ) if directed else None,
             directed=directed,
             signed=signed,
@@ -69,12 +69,12 @@ class LearningModel(BaseModel, torch.nn.Module):
         self.__steps_per_epoch = None  # Number of steps per epoch
 
     def __set_gradients(self, beta_grad=None, x0_grad=None, v_grad=None, prior_grad=None):
-        '''
+        """
         Set the gradient status of the model parameters
         :param beta_grad: The gradient for the bias terms
         :param x0_grad: The gradient for the initial positions
         :param v_grad: The gradient for the velocities
-        '''
+        """
 
         # Set the gradient of the bias terms
         if beta_grad is not None:
@@ -156,7 +156,7 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         # Define the optimizers and parameter group names
         self.group_optimizers = []
-        self.param_groups = [["v"], ["x0", "v"], ["beta", "x0", "v", "prior"] ]
+        self.param_groups = [["v"], ["x0", "v"], ["beta", "x0", "v", "prior"]]
         self.group_epoch_weights = [1.0, 1.0, 1.0]
 
         # For each group of parameters, add a new optimizer
@@ -227,6 +227,10 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         # Get the average epoch loss
         avg_loss = total_batch_loss / float(self.__steps_per_epoch)
+
+        if torch.isnan(avg_loss):
+            print(f"\t- Please restart the training with smaller epoch number or learning rate!")
+            sys.exit(1)
 
         if not math.isfinite(avg_loss):
             print(f"\t- Epoch loss is {avg_loss}, stopping training")
