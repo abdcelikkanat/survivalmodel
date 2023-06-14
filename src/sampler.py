@@ -87,11 +87,11 @@ class BatchSampler(torch.nn.Module):
         # Construct the batch edge states
         batch_states = torch.sparse.mm(selection_mat, self.__edge_states_mat).values()
 
-        expanded_pairs, expanded_times, expanded_states, is_edge, delta_t = utils.expand_data(
+        expanded_pairs, expanded_times, expanded_states, event_states, is_edge, delta_t = utils.expand_data(
             nodes_num=self.__nodes_num, directed=self.__directed, bin_bounds=self.__bin_bounds,
             edge_pair_flat_idx=output.indices()[0], edge_times=batch_times, edge_states=batch_states,
             border_pair_flat_idx=batch_flat_idx_combin, device=self.__device
         )
 
-        return batch_nodes, expanded_pairs, expanded_times, expanded_states, is_edge, delta_t
+        return batch_nodes, expanded_pairs, expanded_times, expanded_states, event_states, is_edge, delta_t
 

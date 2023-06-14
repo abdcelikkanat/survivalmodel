@@ -46,16 +46,11 @@ def standardize(x: torch.Tensor):
     if x is None:
         return x
 
-    if x.dim() == 2:
-        return x - torch.mean(x, dim=0, keepdim=True)
+    # if x.dim() == 3:
+    #     z = x - torch.mean(x, dim=x.dim() - 1, keepdim=True)
+    #     return z / (torch.norm(z, dim=-1, keepdim=True) + EPS)
 
-    elif x.dim() == 3:
-
-        return x - torch.mean(x, dim=1, keepdim=True)
-
-    else:
-
-        raise ValueError("Input of the tensor must be 2 or 3!")
+    return x - torch.mean(x, dim=x.dim() - 2, keepdim=True)
 
 
 def erfi_approx(z: torch.Tensor):
@@ -66,8 +61,12 @@ def erfi_approx(z: torch.Tensor):
     :param z: The input value
     :return: The output value
     """
+    if (z > 4).any():
+        z_ = 1j * z
+        z_[z > 4] = 1j * 4
+    else:
+        z_ = 1j * z
 
-    z_ = 1j * z
     t = 1.0 / (1.0 + _ERFI_P * z_)
 
     return (1 - (t * (_ERFI_A1 + t * (_ERFI_A2 + t * (_ERFI_A3 + t * (_ERFI_A4 + t * _ERFI_A5))))) * torch.exp(

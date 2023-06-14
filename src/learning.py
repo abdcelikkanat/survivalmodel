@@ -22,16 +22,16 @@ class LearningModel(BaseModel, torch.nn.Module):
                 2. * torch.rand(size=(nodes_num, dim), device=device) - 1., requires_grad=False
             ) if directed else None,
             v_s=torch.nn.Parameter(
-                torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False
+                torch.randn(size=(bins_num, nodes_num, dim), device=device), requires_grad=False
             ),
             v_r=torch.nn.Parameter(
-                torch.zeros(size=(bins_num, nodes_num, dim), device=device), requires_grad=False
+                torch.randn(size=(bins_num, nodes_num, dim), device=device), requires_grad=False
             ) if directed else None,
             beta_s=torch.nn.Parameter(
-                torch.zeros(size=(2, ), device=device), requires_grad=False
+                torch.randn(size=(2, ), device=device), requires_grad=False
             ),
             beta_r=torch.nn.Parameter(
-                torch.zeros(size=(2, ), device=device), requires_grad=False
+                torch.randn(size=(2, ), device=device), requires_grad=False
             ) if directed else None,
             prior_lambda=torch.as_tensor(
                 prior_lambda, dtype=torch.float, device=device
@@ -156,7 +156,7 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         # Define the optimizers and parameter group names
         self.group_optimizers = []
-        self.param_groups = [["v"], ["x0", "v"], ["beta", "x0", "v", "prior"]]
+        self.param_groups = [["v"], ["x0", "v"], ["x0", "v", "beta", "prior"]]
         self.group_epoch_weights = [1.0, 1.0, 1.0]
 
         # For each group of parameters, add a new optimizer
@@ -247,8 +247,9 @@ class LearningModel(BaseModel, torch.nn.Module):
         self.train()
 
         # Sample a batch
-        batch_nodes, expanded_pairs, expanded_times, expanded_states, is_edge, delta_t = bs.sample()
+        batch_nodes, expanded_pairs, expanded_times, expanded_states, event_states, is_edge, delta_t = bs.sample()
 
+        # Hide the masked edges
         if self.__masked_pair_indices is not None:
 
             expanded_pairs_idx = utils.matIdx2flatIdx(
@@ -267,7 +268,7 @@ class LearningModel(BaseModel, torch.nn.Module):
         # Finally, compute the negative log-likelihood and the negative log-prior for the batch
         batch_nll, batch_nlp = self.forward(
             nodes=batch_nodes, pairs=expanded_pairs, times=expanded_times, states=expanded_states,
-            is_edge=is_edge, delta_t=delta_t
+            event_states=event_states, is_edge=is_edge, delta_t=delta_t
         )
 
         # Divide the batch loss by the number of all possible pairs
@@ -280,10 +281,12 @@ class LearningModel(BaseModel, torch.nn.Module):
         return average_batch_nll, average_batch_nlp
 
     def forward(self, nodes: torch.Tensor, pairs: torch.LongTensor, times: torch.FloatTensor, states: torch.LongTensor,
-                is_edge: torch.BoolTensor, delta_t: torch.FloatTensor) -> tuple[torch.Tensor, torch.Tensor]:
+                event_states: torch.LongTensor, is_edge: torch.BoolTensor, delta_t: torch.FloatTensor):
 
         # Get the negative log-likelihood
-        nll = self.get_nll(pairs=pairs, times=times, states=states, is_edge=is_edge, delta_t=delta_t)
+        nll = self.get_nll(
+            pairs=pairs, times=times, states=states, event_states=event_states, is_edge=is_edge, delta_t=delta_t
+        )
 
         # Get the negative log-prior and the R-factor inverse
         nlp = self.get_neg_log_prior(nodes=nodes)

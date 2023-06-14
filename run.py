@@ -53,9 +53,10 @@ def parse_arguments():
     parser.add_argument(
         '--seed', type=int, default=19, required=False, help='Seed value to control the randomization'
     )
-    parser.add_argument(
-        '--verbose', type=bool, default=1, required=False, help='Verbose'
-    )
+    parser.add_argument('--verbose', action='store_true', help='Verbose mode (default)')
+    parser.add_argument('--no-verbose', dest='verbose', action='store_false', help='Non-verbose mode')
+    parser.set_defaults(verbose=True)
+
     return parser.parse_args()
 
 
@@ -114,6 +115,9 @@ def process(parser):
 
 
 if __name__ == '__main__':
+
+    torch.autograd.set_detect_anomaly(True)
+
     parser = parse_arguments()
     process(parser)
 

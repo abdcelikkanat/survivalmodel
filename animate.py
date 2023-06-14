@@ -18,9 +18,9 @@ def parse_arguments():
     parser.add_argument(
         '--anim_path', type=str, required=True, default="", help='Animation path'
     )
-    parser.add_argument(
-        '--title', type=bool, required=False, default=True, help='Enable the title of the animation'
-    )
+    parser.add_argument('--title', action='store_true', help='Enable the title of the animation')
+    parser.add_argument('--no-title', dest='title', action='store_false', help='Remove the title of the animation.')
+    parser.set_defaults(title=True)
     parser.add_argument(
         '--font_size', type=int, required=False, default=16, help='Font size of the title'
     )
@@ -30,9 +30,9 @@ def parse_arguments():
     parser.add_argument(
         '--fps', type=int, required=False, default=12, help='Frame per second for the animation'
     )
-    parser.add_argument(
-        '--axis_off', type=bool, required=False, default=True, help='Remove the axis of the animation',
-    )
+    parser.add_argument('--axis', action='store_true', help='Keep the axis of the animation')
+    parser.add_argument('--no-axis', dest='axis', action='store_false', help='Remove the axis of the animation.')
+    parser.set_defaults(axis=False)
     parser.add_argument(
         '--padding', type=int, required=False, default=0, help='Padding for the animation'
     )
@@ -60,9 +60,10 @@ def parse_arguments():
     parser.add_argument(
         '--format', type=str, required=False, choices=["mp4", "gif"], default="mp4", help='Animation file format'
     )
-    parser.add_argument(
-        '--verbose', type=bool, default=1, required=False, help='Verbose'
-    )
+    parser.add_argument('--verbose', action='store_true', help='Verbose mode (default)')
+    parser.add_argument('--no-verbose', dest='verbose', action='store_false', help='Non-verbose mode')
+    parser.set_defaults(verbose=True)
+
     return parser.parse_args()
 
 
@@ -113,7 +114,7 @@ def process(parser):
     anim = Animation(
         rt_s=rt_s, rt_r=rt_r, frame_times=frame_times.detach().numpy(), data_dict=dataset.get_data_dict(weights=True),
         title=parser.title, font_size=parser.font_size, fig_size=parser.fig_size, fps=parser.fps,
-        axis_off=parser.axis_off, padding=parser.padding,
+        axis=parser.axis, padding=parser.padding,
         edge_alpha=parser.edge_alpha, edge_width=parser.edge_width, edge_color=parser.edge_color,
         node_sizes=parser.node_sizes, node_colors=parser.node_color, color_palette=parser.color_palette
     )

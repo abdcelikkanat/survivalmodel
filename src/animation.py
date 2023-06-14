@@ -8,7 +8,7 @@ class Animation:
 
     def __init__(self, rt_s: torch.Tensor, rt_r: torch.Tensor, frame_times: torch.Tensor, data_dict: dict = None,
                  title: bool = True, font_size: int = 16, fig_size: tuple = (12, 10), fps: int = 12,
-                 axis_off: bool = True, padding: int = 0, edge_alpha: float = 0.35, edge_width=1, edge_color='k',
+                 axis: bool = True, padding: int = 0, edge_alpha: float = 0.35, edge_width=1, edge_color='k',
                  node_sizes=100, node_colors='b', color_palette: str = "rocket_r",
                  ):
 
@@ -31,7 +31,7 @@ class Animation:
         self._font_size = font_size
         self._fig_size = fig_size
         self._fps = fps
-        self._axis_off = axis_off
+        self._axis = axis
         self._padding = padding
         self._edge_alpha = edge_alpha
         self._edge_width = edge_width
@@ -147,7 +147,7 @@ class Animation:
         # Set the figure
         fig, ax = plt.subplots(figsize=self._fig_size, frameon=True)
         # Remove the axis
-        if self._axis_off:
+        if not self._axis:
             ax.set_axis_off()
             fig.subplots_adjust(left=0, bottom=0, right=1, top=0.95)
 

@@ -422,6 +422,8 @@ class BaseModel(torch.nn.Module):
         :return:
         """
 
+        _UPPER_BOUND = 8
+
         # Compute the bin indices and residul times of the given time points
         bin_indices = self.get_bin_index(time_list=time_list)
 
@@ -439,31 +441,36 @@ class BaseModel(torch.nn.Module):
 
         norm_delta_r = torch.norm(delta_r, p=2, dim=1, keepdim=False)
         norm_delta_v = torch.norm(delta_v, p=2, dim=1, keepdim=False) + utils.EPS
-
         inv_norm_delta_v = 1.0 / norm_delta_v
         delta_r_v = (delta_r * delta_v).sum(dim=1, keepdim=False)
         r = delta_r_v * inv_norm_delta_v
 
         term0 = 0.5 * torch.sqrt(torch.as_tensor(utils.PI, device=self.__device)) * inv_norm_delta_v
-        # term1 = torch.exp(beta_ij - (2*states-1)*(r**2 - norm_delta_r**2) )
-        term1_plus = torch.exp(beta_ij_plus - (r**2 - norm_delta_r**2))
-        term1_neg = torch.exp(beta_ij_neg + (r**2 - norm_delta_r**2))
 
-        term2_u_plus = utils.erfi_approx(delta_t*norm_delta_v+r)
+        # Because of numerical issues, we need to clamp the ratio vector, r, which is upper bounded by norm_delta_r
+        # But it is not enough to bound only norm_delta_r since we don't update the values of delta_r.
+        # Therefore, we also need to bound r.
+        norm_delta_r = torch.clamp(norm_delta_r, max=_UPPER_BOUND)
+        r = torch.clamp(r, min=-_UPPER_BOUND, max=_UPPER_BOUND)
+
+        term1_plus = torch.exp(beta_ij_plus - (r ** 2 - norm_delta_r ** 2))
+        term1_neg = torch.exp(beta_ij_neg + (r ** 2 - norm_delta_r ** 2))
+
+        term2_u_plus = utils.erfi_approx(delta_t * norm_delta_v + r)
         term2_l_plus = utils.erfi_approx(r)
 
-        term2_u_neg = torch.erf(delta_t*norm_delta_v+r)
+        term2_u_neg = torch.erf(delta_t * norm_delta_v + r)
         term2_l_neg = torch.erf(r)
 
         if self.is_signed():
             output = term0 * (
-                    (1 - (states.absolute() - states)/2)*term1_plus*(term2_u_plus - term2_l_plus) +
-                    (1 - (states.absolute() + states)/2)*term1_neg*(term2_u_neg - term2_l_neg)
+                    (1 - (states.absolute() - states) / 2) * term1_plus * (term2_u_plus - term2_l_plus) +
+                    (1 - (states.absolute() + states) / 2) * term1_neg * (term2_u_neg - term2_l_neg)
             )
         else:
             output = term0 * (
                     states * term1_plus * (term2_u_plus - term2_l_plus) +
-                    (1-states) * term1_neg * (term2_u_neg - term2_l_neg)
+                    (1 - states) * term1_neg * (term2_u_neg - term2_l_neg)
             )
 
         return output
@@ -565,7 +572,7 @@ class BaseModel(torch.nn.Module):
         return output
 
     def get_nll(self, pairs: torch.Tensor, times: torch.FloatTensor, states: torch.LongTensor,
-                is_edge: torch.BoolTensor, delta_t: torch.FloatTensor) -> torch.Tensor:
+                event_states: torch.LongTensor, is_edge: torch.BoolTensor, delta_t: torch.FloatTensor) -> torch.Tensor:
         """
         Computes the negative log-likelihood function of the model
         :param pairs: a matrix of shape 2 x L
@@ -577,12 +584,13 @@ class BaseModel(torch.nn.Module):
         """
 
         non_integral_term = self.get_log_intensity_at(
-            time_list=times[is_edge], edges=pairs[:, is_edge], edge_states=states[is_edge]
+            time_list=times[is_edge], edges=pairs[:, is_edge], edge_states=event_states[is_edge].to(torch.long)
         ).sum()
 
         # Then compute the integral term
         integral_term = self.get_intensity_integral(
-            time_list=times, pairs=pairs, delta_t=delta_t, states=states
+            time_list=times[delta_t > 0], pairs=pairs[:, delta_t > 0],
+            delta_t=delta_t[delta_t > 0], states=states[delta_t > 0]
         ).sum()
 
         return -(non_integral_term - integral_term)
