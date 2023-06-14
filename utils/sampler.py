@@ -127,7 +127,7 @@ def expand_data(nodes_num: int, directed: bool, bin_bounds: torch.Tensor, edge_p
     # Construct the event states
     event_states = expanded_states.clone().roll(1)
     event_states[0] = 0
-    event_states[1:][torch.arange(len(event_states)-1)[mask]    ] = 0
+    event_states[1:][torch.arange(len(event_states)-1, device=device, dtype=torch.long)[mask]] = 0
 
     # Convert the linear indices to matrix indices
     expanded_pairs = flatIdx2matIdx(expanded_pair_idx, n=nodes_num, is_directed=directed)
