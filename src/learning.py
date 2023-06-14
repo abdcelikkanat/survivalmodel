@@ -262,6 +262,7 @@ class LearningModel(BaseModel, torch.nn.Module):
             expanded_pairs = expanded_pairs[:, selected_indices]
             expanded_times = expanded_times[selected_indices]
             expanded_states = expanded_states[selected_indices]
+            event_states = event_states[selected_indices]
             is_edge = is_edge[selected_indices]
             delta_t = delta_t[selected_indices]
 
