@@ -5,7 +5,7 @@ import torch
 class Dataset:
     """
     A class to read a temporal network dataset
-    Version 2.0
+    Version 2.1
     """
 
     def __init__(self, nodes_num=0, edges: torch.Tensor = None, edge_times: torch.Tensor = None,
@@ -31,7 +31,7 @@ class Dataset:
             assert self.__edges.shape[1] == self.__times.shape[0], \
                 f"The number of edges ({self.__edges.shape[1]}) must match with ({self.__times.shape[0]})!"
 
-    def read_edge_list(self, file_path, self_loops: bool = False):
+    def read_edge_list(self, file_path, self_loops: bool = False, check_conditions: bool = True):
         """
         Read the edge list file
         :param file_path: path of the file
@@ -85,10 +85,11 @@ class Dataset:
         self.__nodes_num = len(nodes)
 
         # Check the minimum and maximum node labels
-        assert min(nodes) == 0,\
-            f"The nodes must start from 0, min node: {min(nodes)}."
-        assert max(nodes) + 1 == len(nodes), \
-            f"The max node label is {max(nodes)} but there are {len(nodes)} nodes so some nodes do not have any link."
+        if check_conditions:
+            assert min(nodes) == 0,\
+                f"The nodes must start from 0, min node: {min(nodes)}."
+            assert max(nodes) + 1 == len(nodes), \
+                f"The max node is {max(nodes)} but there are {len(nodes)} nodes so some nodes do not have any link."
 
         # Sort the edges
         sorted_indices = self.__times.argsort()

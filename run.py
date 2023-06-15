@@ -8,8 +8,7 @@ def parse_arguments():
     """
     Parse the command line arguments
     """
-    parser = ArgumentParser(description="Examples: \n",
-                            formatter_class=RawTextHelpFormatter)
+    parser = ArgumentParser(description="Examples: \n", formatter_class=RawTextHelpFormatter)
 
     parser.add_argument(
         '--edges', type=str, required=True, help='Path of the edge list file'
@@ -76,7 +75,7 @@ def process(parser):
     # Read the masked pair file if exists
     if parser.mask_path is not None:
         masked_data = Dataset()
-        masked_data.read_edge_list(parser.mask_path)
+        masked_data.read_edge_list(parser.mask_path, check_conditions=False)
     else:
         masked_data = parser.mask_path
 
