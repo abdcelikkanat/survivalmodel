@@ -10,7 +10,7 @@ class ConstructionModel(torch.nn.Module):
 
     def __init__(self, cluster_sizes: list, bins_num: int, dim: int, directed: bool, prior_lambda: float,
                  prior_sigma_s: float, prior_sigma_r: float, beta_s: list, beta_r: list,
-                 prior_B_x0_logit_c_s: float, prior_B_x0_logit_c_r: float, prior_B_ls_s: float, prior_B_ls_r: float,
+                 prior_B_x0_s: float, prior_B_x0_r: float, prior_B_ls_s: float, prior_B_ls_r: float,
                  device: torch.device = "cpu", verbose: bool = False, seed: int = 0):
 
         super(ConstructionModel, self).__init__()
@@ -32,15 +32,15 @@ class ConstructionModel(torch.nn.Module):
         self.__prior_lambda = prior_lambda
         self.__prior_sigma_s = torch.as_tensor(prior_sigma_s, dtype=torch.float, device=device)
         self.__prior_sigma_r = None
-        self.__prior_B_x0_logit_c_s = torch.as_tensor(prior_B_x0_logit_c_s, dtype=torch.float, device=device)
-        self.__prior_B_x0_logit_c_r = None
+        self.__prior_B_x0_s = torch.as_tensor([prior_B_x0_s], dtype=torch.float, device=device)
+        self.__prior_B_x0_r = None
         self.__prior_B_ls_s = torch.as_tensor(prior_B_ls_s, dtype=torch.float, device=device)
         self.__prior_B_ls_r = None
         if self.__directed:
             self.__beta_r = torch.as_tensor(beta_r, dtype=torch.float, device=device)
             self.__prior_sigma_r = torch.as_tensor(prior_sigma_r, dtype=torch.float, device=device)
             self.__prior_B_ls_r = torch.as_tensor(prior_B_ls_r, dtype=torch.float, device=device)
-            self.__prior_B_x0_logit_c_r = torch.as_tensor(prior_B_x0_logit_c_r, dtype=torch.float, device=device)
+            self.__prior_B_x0_r = torch.as_tensor([prior_B_x0_r], dtype=torch.float, device=device)
 
         # Construct the Q matrix for the node matrix C, (nodes)
         self.__prior_C_Q_s = -utils.INF * torch.ones(size=(self.__nodes_num, self.__k), dtype=torch.float)
@@ -74,8 +74,13 @@ class ConstructionModel(torch.nn.Module):
             x0_r=x0_r, v_r=v_r, beta_r=self.__beta_r,
             device=self.__device, verbose=self.__verbose, seed=self.__seed
         )
+
         # Sample the events and states for each pair
         edges, edge_times, edge_states = self.sample_events(bm=bm)
+
+        # edges = torch.as_tensor([[0, 0], [1, 1.]])
+        # edge_times = torch.as_tensor([0, 1000])
+        # edge_states = torch.as_tensor([0, 1])
 
         # Construct the dataset
         dataset = Dataset(
@@ -103,7 +108,7 @@ class ConstructionModel(torch.nn.Module):
         # Construct the factor of B matrix (bins)
         B_factor_s = torch.linalg.cholesky(
             utils.EPS*torch.eye(self.__bins_num+1, device=self.__device) + torch.block_diag(
-                torch.sigmoid(self.__prior_B_x0_logit_c_s)**2,
+                self.__prior_B_x0_s**2,
                 torch.exp(-((bin_centers - bin_centers.T)**2 / (2.0*(self.__prior_B_ls_s**2))))
             )
         )
@@ -187,6 +192,7 @@ class ConstructionModel(torch.nn.Module):
 
         edges, edge_times, edge_states = [], [], []
         for i, j in utils.pair_iter(self.__nodes_num, self.__directed):
+            # print(i,j)
 
             # Define the intensity function for each node pair (i,j)
             intensity_func = lambda t, state: bm.get_intensity_at(
@@ -207,7 +213,6 @@ class ConstructionModel(torch.nn.Module):
             critical_points = self.__get_critical_points(
                 i=i, j=j, bin_bounds=bm.get_bin_bounds(), rt_s=rt_s, rt_r=rt_r, v_s=v_s, v_r=v_r
             )
-
             # Simulate the Survive or Die Process
             nhpp_ij = SequentialSurviveProcess(
                 lambda_func=intensity_func, initial_state=0, critical_points=critical_points,
@@ -306,8 +311,8 @@ class ConstructionModel(torch.nn.Module):
             f.write(f"Prior lambda: {self.__prior_lambda}\n")
             f.write(f"Prior sigma_s: {self.__prior_sigma_s}\n")
             f.write(f"Prior sigma_r: {self.__prior_sigma_r}\n")
-            f.write(f"Prior B_x0_logit_c_s: {self.__prior_B_x0_logit_c_s}\n")
-            f.write(f"Prior B_x0_logit_c_r: {self.__prior_B_x0_logit_c_r}\n")
+            f.write(f"Prior B_x0_s: {self.__prior_B_x0_s}\n")
+            f.write(f"Prior B_x0_r: {self.__prior_B_x0_r}\n")
             f.write(f"Prior B_ls_s: {self.__prior_B_ls_s}\n")
             f.write(f"Prior B_ls_r: {self.__prior_B_ls_r}\n")
             f.write(f"Prior C Q_s:\n{self.__prior_C_Q_s}\n")
@@ -342,7 +347,7 @@ class ConstructionModel(torch.nn.Module):
         ).reshape(nodes_num, frames_num, self.__dim).transpose(0, 1) if self.__directed else None
 
         anim = Animation(
-            rt_s=rt_s, rt_r=rt_r, frame_times=frame_times,
+            rt_s=rt_s, rt_r=rt_r, frame_times=frame_times, axis=False,
             data_dict=self.__dataset.get_data_dict(weights=True),
         )
         anim.save(file_path, format="mp4")

@@ -205,11 +205,15 @@ class Dataset:
         data_dict = {}
         for i, j, t, w in zip(self.get_edges(0), self.get_edges(1), self.get_times(), self.get_weights()):
 
+            # If the source node has been added to the dictionary before.
             if i.item() in data_dict:
+                # If the target node has been added to the dictionary before.
                 if j.item() in data_dict[i.item()]:
                     data_dict[i.item()][j.item()].append((t, w) if weights else t)
+                # If the target node has not been added to the dictionary before.
                 else:
                     data_dict[i.item()][j.item()] = [(t, w) if weights else t]
+            # if the source node has not been added to the dictionary before.
             else:
                 data_dict[i.item()] = {j.item(): [(t, w) if weights else t]}
 

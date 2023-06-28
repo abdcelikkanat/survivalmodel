@@ -46,10 +46,13 @@ is_directed = dataset.is_directed()
 is_signed = dataset.is_signed()
 del dataset
 
+MIN_INTERVAL_SIZE = int(1e-2 * (last_time - init_time))
+
 ########################################################################################################################
 
 
 def durations2samples(pos_durations, zero_durations, neg_durations, max_sample_size):
+    print("Generating samples...")
 
     # Construct the zero samples
     perm = torch.randperm(len(zero_durations))
@@ -58,20 +61,29 @@ def durations2samples(pos_durations, zero_durations, neg_durations, max_sample_s
     zero_pairs, zero_intervals, zero_labels = [], [], []
     for idx in zero_chosen_idx:
         zero_pairs.append((zero_durations[idx][0], zero_durations[idx][1]))
-        zero_intervals.append((zero_durations[idx][2].item() + zero_durations[idx][3].item())/2)
+        zero_intervals.append((zero_durations[idx][2].item(), zero_durations[idx][3].item()))
         zero_labels.append(zero_durations[idx][4])
+
+        if zero_durations[idx][3].item() - zero_durations[idx][2].item() < MIN_INTERVAL_SIZE:
+            raise Exception("Zero interval size is less than the minimum interval size")
 
     pos_pairs, pos_intervals, pos_labels = [], [], []
     for idx in range(len(pos_durations)):
         pos_pairs.append((pos_durations[idx][0], pos_durations[idx][1]))
-        pos_intervals.append((pos_durations[idx][2].item() + pos_durations[idx][3].item())/2)
+        pos_intervals.append((pos_durations[idx][2].item(), pos_durations[idx][3].item()))
         pos_labels.append(pos_durations[idx][4])
+
+        if pos_durations[idx][3].item() - pos_durations[idx][2].item() < MIN_INTERVAL_SIZE:
+            raise Exception("Positive interval size is less than the minimum interval size")
 
     neg_pairs, neg_intervals, neg_labels = [], [], []
     for idx in range(len(neg_durations)):
         neg_pairs.append((neg_durations[idx][0], neg_durations[idx][1]))
-        neg_intervals.append((neg_durations[idx][2].item() + neg_durations[idx][3].item())/2)
+        neg_intervals.append((neg_durations[idx][2].item(), neg_durations[idx][3].item()))
         neg_labels.append(neg_durations[idx][4])
+
+        if neg_durations[idx][3].item() - neg_durations[idx][2].item() < MIN_INTERVAL_SIZE:
+            raise Exception("Negative interval size is less than the minimum interval size")
 
     samples = {'zero': {'pairs': zero_pairs, 'intervals': zero_intervals, 'labels': zero_labels},
                'pos': {'pairs': pos_pairs, 'intervals': pos_intervals, 'labels': pos_labels},
@@ -108,7 +120,7 @@ def get_durations(data_dict, directed, nodes_num, init_time, last_time):
                         if idx == 0:
 
                             # If the time is greater than the initial time, than add the duration [init_time, time]
-                            if time > init_time:
+                            if time > init_time and time-init_time > MIN_INTERVAL_SIZE:
 
                                 # Assumption: the first event time must indicate a positive or negative link
                                 duration = (i, j, init_time, time, 0)
@@ -118,18 +130,19 @@ def get_durations(data_dict, directed, nodes_num, init_time, last_time):
 
                             # For duration [time_state_list[idx-1][0], time_state_list[idx][0]]
                             # The state of the duration is the state of the previous event
-                            duration = (i, j, time_state_list[idx-1][0], time, time_state_list[idx-1][1])
+                            if time > time_state_list[idx-1][0] and time-time_state_list[idx-1][0] > MIN_INTERVAL_SIZE:
+                                duration = (i, j, time_state_list[idx-1][0], time, time_state_list[idx-1][1])
 
-                            if duration[4] == 1:
-                                pos_durations.append(duration)
-                            elif duration[4] == -1:
-                                neg_durations.append(duration)
-                            else:
-                                zero_durations.append(duration)
+                                if duration[4] == 1:
+                                    pos_durations.append(duration)
+                                elif duration[4] == -1:
+                                    neg_durations.append(duration)
+                                else:
+                                    zero_durations.append(duration)
 
                     # If the last event time is smaller than the last time of the network
                     # Add the duration [time_state_list[-1][0], last_time]
-                    if last_time != time_state_list[-1][0]:
+                    if last_time != time_state_list[-1][0] and last_time-time_state_list[-1][0] > MIN_INTERVAL_SIZE:
 
                         duration = (i, j, time_state_list[-1][0], last_time, time_state_list[-1][1])
                         if duration[4] == 1:

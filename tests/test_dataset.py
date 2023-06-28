@@ -13,7 +13,7 @@ class TestDataset(unittest.TestCase):
         last_time = 1.0
 
         ds = Dataset(
-            nodes_num = len(torch.unique(edges)), edges=edges, edge_times=edge_times, init_time=init_time, last_time=last_time
+            nodes_num=len(torch.unique(edges)), edges=edges, edge_times=edge_times, init_time=init_time, last_time=last_time
         )
 
         first_split, second_split = ds.split_over_time(split_ratio=0.5)

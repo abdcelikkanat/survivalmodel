@@ -56,16 +56,22 @@ class SequentialSurviveProcess:
                 # Step 6
                 if U <= self.__lambda_func(t, state=states[-1])/self.__lambda_max[states[-1], J]:
                     # Don't need I for index, because we append t to S
-                    if len(S) and abs(S[-1] - t.item()) < utils.EPS:
-                        S.pop()
-                        states.pop()
-                    else:
-                        S.append(t.item())
-                        states.append(1 - states[-1])
+                    # if len(S) and abs(S[-1] - t.item()) < utils.EPS:
+                    #     S.pop()
+                    #     states.pop()
+                    # else:
+                    S.append(t.item())
+                    states.append(1 - states[-1])
                 # Step 7 -> Do step 2 then loop starts again at step 3
                 U = torch.rand(1)  # Random number
                 # Random variable from exponential dist.
                 X = (-1./(self.__lambda_max[states[-1], J]+utils.EPS)) * torch.log(U)
+                # If X is too small, then we can discard the current event and sample again
+                if X < utils.EPS and len(S):
+                    S.pop()
+                    states.pop()
+                    X = (-1. / (self.__lambda_max[states[-1], J] + utils.EPS)) * torch.log(U)
+
             else:
                 # Step 8
                 if J == self.__num_of_bins - 1:  # k +1 because of zero-indexing
