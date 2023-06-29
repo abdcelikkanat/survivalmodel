@@ -275,6 +275,31 @@ residual_pairs = first_half_pairs.copy()
 residual_times = first_half_times.copy()
 residual_states = first_half_states.copy()
 
+# Remove the mask pairs from the residual pairs
+if mask_size:
+    mask_pair_indices = [
+        matIdx2flatIdx(
+            i=torch.as_tensor([pair[0]], dtype=torch.long), j=torch.as_tensor([pair[1]], dtype=torch.long),
+            n=nodes_num, is_directed=directed
+        ).item()
+        for pair in mask_pairs
+    ]
+
+    idx = 0
+    while idx < len(residual_pairs):
+        pair = residual_pairs[idx]
+        pair_idx = matIdx2flatIdx(
+            i=torch.as_tensor([pair[0]], dtype=torch.long), j=torch.as_tensor([pair[1]], dtype=torch.long),
+            n=nodes_num, is_directed=directed
+        ).item()
+        if pair_idx in mask_pair_indices:
+            residual_pairs.pop(idx)
+            residual_times.pop(idx)
+            residual_states.pop(idx)
+        else:
+            idx += 1
+
+# Remove the completion pairs from the residual pairs
 if completion_size:
     completion_pair_indices = [
         matIdx2flatIdx(
