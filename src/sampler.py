@@ -81,6 +81,9 @@ class BatchSampler(torch.nn.Module):
             size=(self.__pairs_num, self.__pairs_num), device=self.__device
         )
 
+        print( self.__edge_times_mat.to_dense())
+        raise Exception("stop")
+
         output = torch.sparse.mm(selection_mat, self.__edge_times_mat)
         # Construct the batch edge times
         batch_times = output.values()
@@ -92,6 +95,8 @@ class BatchSampler(torch.nn.Module):
             edge_pair_flat_idx=output.indices()[0], edge_times=batch_times, edge_states=batch_states,
             border_pair_flat_idx=batch_flat_idx_combin, device=self.__device
         )
+        print(batch_nodes)
+        return batch_nodes, expanded_pairs, expanded_times, expanded_states, event_states, is_edge, delta_t, \
+            utils.flatIdx2matIdx(output.indices()[0], self.__nodes_num, self.__directed), batch_times, batch_states
 
-        return batch_nodes, expanded_pairs, expanded_times, expanded_states, event_states, is_edge, delta_t
 

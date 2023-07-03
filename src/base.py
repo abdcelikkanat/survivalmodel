@@ -487,10 +487,14 @@ class BaseModel(torch.nn.Module):
         :return:
         """
 
+        _UPPER_BOUND = 8
+
         # Before starting, we need to extend the time_list, pairs, and states for the model bin boundaries
         # Find the initial and the last bin indices of the integral interval
         init_bin_idx = utils.div(time_list, self.get_bin_width())
         last_bin_idx = utils.div(time_list + delta_t, self.get_bin_width())
+        init_bin_idx[init_bin_idx == self.get_bins_num()] -= 1
+        last_bin_idx[last_bin_idx == self.get_bins_num()] -= 1
         # Find the number of required bins for each event time
         repeat_counts = (last_bin_idx - init_bin_idx + 1).to(torch.long)
 
@@ -509,18 +513,21 @@ class BaseModel(torch.nn.Module):
         # Construct the extended time list vector
         extended_time_list = torch.repeat_interleave(self.get_bin_width() * init_bin_idx, repeats=repeat_counts, dim=0)
         extended_time_list = extended_time_list + temp * self.get_bin_width()
+        # print("BURA----:", init_bin_idx[init_bin_idx>=100], last_bin_idx[last_bin_idx>=100], extended_time_list[extended_time_list >= 1.])
         extended_time_list[start_marker] = time_list
 
         # Construct the extended delta_t vector
         extended_delta_t = torch.concat((
             extended_time_list[1:]-extended_time_list[:-1], torch.zeros(1, device=self.get_device(), dtype=torch.float)
         ))
+        # The residual of the last time bins is the delta_t % bin_width
+        # Note that delta_t can be equal to bin_width, so if this is the case, the residual must be bin_width
         extended_delta_t[last_marker] = time_list + delta_t - extended_time_list[last_marker]
 
         extended_pairs = torch.repeat_interleave(pairs, repeats=repeat_counts, dim=1)
         extended_states = torch.repeat_interleave(states, repeats=repeat_counts, dim=0)
 
-        # Compute the bin indices and residul times of the given time points
+        # Compute the bin indices and residual times of the given time points
         bin_indices = self.get_bin_index(time_list=extended_time_list)
 
         # Get the position and velocity differences
@@ -542,8 +549,14 @@ class BaseModel(torch.nn.Module):
         delta_r_v = (delta_r * delta_v).sum(dim=1, keepdim=False)
         r = delta_r_v * inv_norm_delta_v
 
+        # Because of numerical issues, we need to clamp the ratio vector, r, which is upper bounded by norm_delta_r
+        # But it is not enough to bound only norm_delta_r since we don't update the values of delta_r.
+        # Therefore, we also need to bound r.
+        norm_delta_r = torch.clamp(norm_delta_r, max=_UPPER_BOUND)
+        r = torch.clamp(r, min=-_UPPER_BOUND, max=_UPPER_BOUND)
+
         term0 = 0.5 * torch.sqrt(torch.as_tensor(utils.PI, device=self.__device)) * inv_norm_delta_v
-        # term1 = torch.exp(beta_ij - (2*states-1)*(r**2 - norm_delta_r**2) )
+
         term1_plus = torch.exp(beta_ij_plus - (r ** 2 - norm_delta_r ** 2))
         term1_neg = torch.exp(beta_ij_neg + (r ** 2 - norm_delta_r ** 2))
 
@@ -572,7 +585,8 @@ class BaseModel(torch.nn.Module):
         return output
 
     def get_nll(self, pairs: torch.Tensor, times: torch.FloatTensor, states: torch.LongTensor,
-                event_states: torch.LongTensor, is_edge: torch.BoolTensor, delta_t: torch.FloatTensor) -> torch.Tensor:
+                event_states: torch.LongTensor, is_edge: torch.BoolTensor, delta_t: torch.FloatTensor,
+                batch_pairs, batch_times, batch_states) -> torch.Tensor:
         """
         Computes the negative log-likelihood function of the model
         :param pairs: a matrix of shape 2 x L
@@ -593,7 +607,23 @@ class BaseModel(torch.nn.Module):
             delta_t=delta_t[delta_t > 0], states=states[delta_t > 0]
         ).sum()
 
-        return -(non_integral_term - integral_term)
+        delta_t = batch_times[1:] - batch_times[:-1]
+        delta_t[delta_t < 0] = 1. - batch_times[:-1][delta_t < 0]
+        delta_t = torch.hstack((delta_t, torch.ones(1, dtype=torch.float, device=self.get_device())*(1-batch_times[-1])  ))
+
+        for pair, time, dt in zip(batch_pairs[:, delta_t > 0].T, batch_times[delta_t > 0], delta_t[delta_t > 0]):
+            print(pair, time, dt)
+        print("-----")
+
+        integral_term2 = self.get_intensity_integral_for(
+            time_list=batch_times[delta_t > 0], pairs=batch_pairs[:, delta_t > 0],
+            delta_t=delta_t[delta_t > 0], states=batch_states[delta_t > 0]
+        ).sum()
+
+        # assert abs(integral_term - integral_term2) < 1e-2, f"Oh noo! {integral_term} {integral_term2}"
+        print(f" {integral_term} vs {integral_term2}")
+
+        return -(non_integral_term - integral_term2)
 
     def get_neg_log_prior(self, nodes: torch.Tensor) -> torch.float:
         """

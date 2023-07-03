@@ -247,7 +247,7 @@ class LearningModel(BaseModel, torch.nn.Module):
         self.train()
 
         # Sample a batch
-        batch_nodes, expanded_pairs, expanded_times, expanded_states, event_states, is_edge, delta_t = bs.sample()
+        batch_nodes, expanded_pairs, expanded_times, expanded_states, event_states, is_edge, delta_t, batch_pairs, batch_times, batch_states = bs.sample()
 
         # Hide the masked edges
         if self.__masked_pair_indices is not None:
@@ -269,7 +269,8 @@ class LearningModel(BaseModel, torch.nn.Module):
         # Finally, compute the negative log-likelihood and the negative log-prior for the batch
         batch_nll, batch_nlp = self.forward(
             nodes=batch_nodes, pairs=expanded_pairs, times=expanded_times, states=expanded_states,
-            event_states=event_states, is_edge=is_edge, delta_t=delta_t
+            event_states=event_states, is_edge=is_edge, delta_t=delta_t,
+            batch_pairs=batch_pairs, batch_times=batch_times, batch_states=batch_states
         )
 
         # Divide the batch loss by the number of all possible pairs
@@ -282,11 +283,14 @@ class LearningModel(BaseModel, torch.nn.Module):
         return average_batch_nll, average_batch_nlp
 
     def forward(self, nodes: torch.Tensor, pairs: torch.LongTensor, times: torch.FloatTensor, states: torch.LongTensor,
-                event_states: torch.LongTensor, is_edge: torch.BoolTensor, delta_t: torch.FloatTensor):
+                event_states: torch.LongTensor, is_edge: torch.BoolTensor, delta_t: torch.FloatTensor,
+                batch_pairs, batch_times, batch_states
+                ):
 
         # Get the negative log-likelihood
         nll = self.get_nll(
-            pairs=pairs, times=times, states=states, event_states=event_states, is_edge=is_edge, delta_t=delta_t
+            pairs=pairs, times=times, states=states, event_states=event_states, is_edge=is_edge, delta_t=delta_t,
+            batch_pairs=batch_pairs, batch_times=batch_times, batch_states=batch_states
         )
 
         # Get the negative log-prior and the R-factor inverse
