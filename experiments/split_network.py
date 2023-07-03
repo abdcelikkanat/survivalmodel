@@ -20,7 +20,7 @@ parser.add_argument(
     '--pr', type=float, required=False, default=0.1, help='Prediction ratio'
 )
 parser.add_argument(
-    '--mr', type=float, required=False, default=0.2, help='Masking ratio'
+    '--mr', type=float, required=False, default=0.1, help='Validation ratio'
 )
 parser.add_argument(
     '--cr', type=float, required=False, default=0.1, help='Completion ratio'
@@ -39,7 +39,7 @@ args = parser.parse_args()
 edges_file = args.edges
 output_folder = args.output_folder
 prediction_ratio = args.pr
-masking_ratio = args.mr
+validationing_ratio = args.mr
 completion_ratio = args.cr
 verbose = args.verbose
 seed = args.seed
@@ -198,16 +198,16 @@ min_time, max_time = int(first_half_dataset.get_init_time()), int(first_half_dat
 ########################################################################################################################
 
 if verbose:
-    print("- Sampling processes for the masking and completion pairs have just started!")
+    print("- Sampling processes for the validation and completion pairs have just started!")
 
-# Sample the masking and completion pairs
+# Sample the validation and completion pairs
 all_possible_pair_num = nodes_num * (nodes_num - 1)
 if not directed:
     all_possible_pair_num = all_possible_pair_num // 2
 
-mask_size = int(all_possible_pair_num * masking_ratio)
+validation_size = int(all_possible_pair_num * validation_ratio)
 completion_size = int(all_possible_pair_num * completion_ratio)
-total_sample_size = mask_size + completion_size
+total_sample_size = validation_size + completion_size
 
 
 # Construct pair indices
@@ -236,26 +236,26 @@ for k, pair in enumerate(all_pos_pairs.T):
 
 assert len(sampled_pairs) == total_sample_size, "Enough number of sample pairs couldn't be found!"
 
-# Set the completion and mask pairs
-mask_pairs, completion_pairs = [], []
-if mask_size:
-    mask_pairs = sampled_pairs[:mask_size]
+# Set the completion and validation pairs
+validation_pairs, completion_pairs = [], []
+if validation_size:
+    validation_pairs = sampled_pairs[:validation_size]
 if completion_size:
-    completion_pairs = sampled_pairs[mask_size:]
+    completion_pairs = sampled_pairs[validation_size:]
 
-# Set the completion and mask events
+# Set the completion and validation events
 first_half_data_dict = first_half_dataset.get_data_dict(weights=True)
-mask_events = [
+validation_events = [
     [e for e, _ in first_half_data_dict[pair[0]][pair[1]]]
     if pair[0] in first_half_data_dict and pair[1] in first_half_data_dict[pair[0]]
     else [min_time]
-    for pair in mask_pairs
+    for pair in validation_pairs
 ]
-mask_states = [
+validation_states = [
     [s for _, s in first_half_data_dict[pair[0]][pair[1]]]
     if pair[0] in first_half_data_dict and pair[1] in first_half_data_dict[pair[0]]
     else [0]
-    for pair in mask_pairs
+    for pair in validation_pairs
 ]
 completion_events = [
     [e for e, _ in first_half_data_dict[pair[0]][pair[1]]]
@@ -275,14 +275,14 @@ residual_pairs = first_half_pairs.copy()
 residual_times = first_half_times.copy()
 residual_states = first_half_states.copy()
 
-# Remove the mask pairs from the residual pairs
-if mask_size:
-    mask_pair_indices = [
+# Remove the validation pairs from the residual pairs
+if validation_size:
+    validation_pair_indices = [
         matIdx2flatIdx(
             i=torch.as_tensor([pair[0]], dtype=torch.long), j=torch.as_tensor([pair[1]], dtype=torch.long),
             n=nodes_num, is_directed=directed
         ).item()
-        for pair in mask_pairs
+        for pair in validation_pairs
     ]
 
     idx = 0
@@ -292,7 +292,7 @@ if mask_size:
             i=torch.as_tensor([pair[0]], dtype=torch.long), j=torch.as_tensor([pair[1]], dtype=torch.long),
             n=nodes_num, is_directed=directed
         ).item()
-        if pair_idx in mask_pair_indices:
+        if pair_idx in validation_pair_indices:
             residual_pairs.pop(idx)
             residual_times.pop(idx)
             residual_states.pop(idx)
@@ -324,11 +324,11 @@ if completion_size:
             idx += 1
 
 if verbose:
-    print(f"\t+ Masking set has {mask_size} pairs.")
-    print(f"\t\t+ {sum(map(len, mask_events))} masking pairs contain at least one event. ")
+    print(f"\t+ Validation set has {validation_size} pairs.")
+    print(f"\t\t+ {sum(map(len, validation_events))} validation pairs contain at least one event. ")
 
     print(f"\t+ Completion set has {completion_size} pairs.")
-    print(f"\t\t+ {sum(map(len, completion_events))} masking pairs have at least one event. ")
+    print(f"\t\t+ {sum(map(len, completion_events))} validation pairs have at least one event. ")
 
     print(f"\t+ Residual network has {len(residual_pairs)} event pairs.")
 
@@ -370,14 +370,14 @@ with open(completion_path, 'w') as f:
     for element in sorted(triplets, key=lambda x: (x[2], x[0], x[1], x[3])):
         f.write(f"{element[0]}\t{element[1]}\t{element[2]}\t{element[3]}\n")
 
-# Save the mask pair and events
-mask_path = os.path.join(output_folder, "mask.edges")
+# Save the validation pair and events
+validation_path = os.path.join(output_folder, "validation.edges")
 triplets = [
     (pair[0], pair[1], t, s)
-    for pair, pair_times, pair_states in zip(mask_pairs, mask_events, mask_states)
+    for pair, pair_times, pair_states in zip(validation_pairs, validation_events, validation_states)
     for t, s in zip(pair_times, pair_states)
 ]
-with open(mask_path, 'w') as f:
+with open(validation_path, 'w') as f:
     for element in sorted(triplets, key=lambda x: (x[2], x[0], x[1], x[3])):
         f.write(f"{element[0]}\t{element[1]}\t{element[2]}\t{element[3]}\n")
 
