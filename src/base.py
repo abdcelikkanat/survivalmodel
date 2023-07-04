@@ -287,7 +287,7 @@ class BaseModel(torch.nn.Module):
 
         # Compute the bin indices and residul times of the given time points
         bin_indices = self.get_bin_index(time_list=time_list)
-        residual_time = self.get_residual(time_list=time_list, bin_indices=bin_indices)
+        residual_time = self.get_residual(time_list=time_list)
 
         # Get the initial position and velocity vectors
         x0 = self.get_x0_r(standardize=standardize)
@@ -487,6 +487,8 @@ class BaseModel(torch.nn.Module):
         :return:
         """
 
+        _UPPER_BOUND = 8
+
         # Before starting, we need to extend the time_list, pairs, and states for the model bin boundaries
         # Find the initial and the last bin indices of the integral interval
         init_bin_idx = utils.div(time_list, self.get_bin_width())
@@ -541,6 +543,12 @@ class BaseModel(torch.nn.Module):
         inv_norm_delta_v = 1.0 / norm_delta_v
         delta_r_v = (delta_r * delta_v).sum(dim=1, keepdim=False)
         r = delta_r_v * inv_norm_delta_v
+
+        # Because of numerical issues, we need to clamp the ratio vector, r, which is upper bounded by norm_delta_r
+        # But it is not enough to bound only norm_delta_r since we don't update the values of delta_r.
+        # Therefore, we also need to bound r.
+        norm_delta_r = torch.clamp(norm_delta_r, max=_UPPER_BOUND)
+        r = torch.clamp(r, min=-_UPPER_BOUND, max=_UPPER_BOUND)
 
         term0 = 0.5 * torch.sqrt(torch.as_tensor(utils.PI, device=self.__device)) * inv_norm_delta_v
         # term1 = torch.exp(beta_ij - (2*states-1)*(r**2 - norm_delta_r**2) )

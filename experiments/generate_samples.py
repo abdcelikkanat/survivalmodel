@@ -91,6 +91,7 @@ def durations2samples(pos_durations, zero_durations, neg_durations, max_sample_s
 
     return samples
 
+
 def get_durations(data_dict, directed, nodes_num, init_time, last_time):
     """
     Get the durations from the data dictionary
@@ -170,6 +171,15 @@ residual_data_dict = residual_dataset.get_data_dict(weights=True)
 res_pos_dur, res_zero_dur, res_neg_dur = get_durations(residual_data_dict, is_directed, nodes_num, init_time, last_time)
 res_samples = durations2samples(res_pos_dur, res_zero_dur, res_neg_dur, max_sample_size)
 
+# Construct the samples for the validation set
+# Read the residual dataset
+valid_dataset = Dataset()
+valid_dataset.read_edge_list(os.path.join(split_folder, "./validation.edges"))
+valid_data_dict = valid_dataset.get_data_dict(weights=True)
+
+valid_pos_dur, valid_zero_dur, valid_neg_dur = get_durations(valid_data_dict, is_directed, nodes_num, init_time, last_time)
+valid_samples = durations2samples(valid_pos_dur, valid_zero_dur, valid_neg_dur, max_sample_size)
+
 # Construct the samples for the completion set
 # Read the residual dataset
 comp_dataset = Dataset()
@@ -199,6 +209,10 @@ if not os.path.exists(samples_folder):
 
 with open(os.path.join(samples_folder, "reconstruction.samples"), 'wb') as f:
     pickle.dump(res_samples, f)
+
+# Save the validation samples
+with open(os.path.join(samples_folder, "validation.samples"), 'wb') as f:
+    pickle.dump(comp_samples, f)
 
 # Save the completion samples
 with open(os.path.join(samples_folder, "completion.samples"), 'wb') as f:
