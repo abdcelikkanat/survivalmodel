@@ -104,8 +104,8 @@ for i in data_dict.keys():
                 second_half_states[-1].append(state)
 
         # Order the event times and states with respect to the time in the first and second half
-        first_half_times[-1], first_half_states[-1] = zip(*sorted(zip(first_half_times[-1], first_half_states[-1])))
-        second_half_times[-1], second_half_states[-1] = zip(*sorted(zip(second_half_times[-1], second_half_states[-1])))
+        first_half_times, first_half_states = zip(*sorted(zip(first_half_times, first_half_states)))
+        second_half_times, second_half_states = zip(*sorted(zip(second_half_times, second_half_states)))
 
         # If the first half pair does not have any event but the second half contains any event,
         # then add a zero event to the first half
