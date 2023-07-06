@@ -103,28 +103,28 @@ for i in data_dict.keys():
                 second_half_times[-1].append(time)
                 second_half_states[-1].append(state)
 
-            # Remove the pair if it does not contain any event
-            if len(first_half_times[-1]) == 0:
+        # Order the event times and states with respect to the time in the first and second half
+        first_half_times[-1], first_half_states[-1] = zip(*sorted(zip(first_half_times[-1], first_half_states[-1])))
+        second_half_times[-1], second_half_states[-1] = zip(*sorted(zip(second_half_times[-1], second_half_states[-1])))
 
-                first_half_pairs.pop()
-                first_half_times.pop()
-                first_half_states.pop()
+        # If the first half pair does not have any event but the second half contains any event,
+        # then add a zero event to the first half
+        if len(first_half_times[-1]) == 0 and len(second_half_times[-1]) != 0:
+            first_half_times[-1].append(min_time)
+            first_half_states[-1].append(0)
 
-                second_half_pairs.pop()
-                second_half_times.pop()
-                second_half_states.pop()
+        # If the first half pair has any event but the second half does not contain any event,
+        # then add a zero event to the second half
+        if len(first_half_times[-1]) != 0 and len(second_half_times[-1]) == 0:
+            second_half_times[-1].append(split_time)
+            second_half_states[-1].append(first_half_states[-1][-1])
 
-            # If the train pair has edge, add the last state of the first half to the prediction set
-            else:
-                second_half_times[-1].append(split_time)
-                second_half_states[-1].append(
-                    max(zip(first_half_times, first_half_states[-1]), key=lambda value: value[0])[1]
-                )
-
-# Construct a static graph from the links in the training set
+# Construct a static graph from the non-zero state links in the training set
 first_half_graph = nx.DiGraph() if directed else nx.Graph()
 first_half_graph.add_nodes_from(range(nodes_num))
-first_half_graph.add_edges_from(first_half_pairs)
+first_half_graph.add_edges_from(
+    [pair for pair, pair_states in zip(first_half_pairs, first_half_states) if 1 in pair_states or -1 in pair_states]
+)
 
 if verbose:
     print(f"\t+ The static version of the first half graph has {first_half_graph.number_of_nodes()} nodes.")
@@ -157,6 +157,18 @@ if len(list(nx.isolates(first_half_graph))) != 0:
 
     # Remove the isolated nodes from the networkx graph
     first_half_graph.remove_nodes_from(isolated_nodes)
+
+    # Remove the isolated nodes from the second half pairs/events/states lists
+    idx, count = 0, 0
+    while idx < len(second_half_pairs):
+        i, j = second_half_pairs[idx]
+        if i in isolated_nodes or j in isolated_nodes:
+            second_half_pairs.pop(idx)
+            second_half_times.pop(idx)
+            second_half_states.pop(idx)
+            count += 1
+        else:
+            idx += 1
 
     if verbose:
         print(f"\t\t+ {count} pairs have been removed from the first half set.")
@@ -194,11 +206,15 @@ first_half_dataset = Dataset(
     edge_times=torch.as_tensor([t for pair_times in first_half_times for t in pair_times], dtype=torch.long),
     edge_weights=torch.as_tensor([s for pair_states in first_half_states for s in pair_states]).to(torch.long),
 )
+# Update the min and max times
 min_time, max_time = int(first_half_dataset.get_init_time()), int(first_half_dataset.get_last_time())
 ########################################################################################################################
 
 if verbose:
     print("- Sampling processes for the validation and completion pairs have just started!")
+
+# Get the first half graph data dict
+first_half_data_dict = first_half_dataset.get_data_dict(weights=True)
 
 # Sample the validation and completion pairs
 all_possible_pair_num = nodes_num * (nodes_num - 1)
@@ -223,8 +239,11 @@ for k, pair in enumerate(all_pos_pairs.T):
     if first_half_graph.has_edge(i, j):
         first_half_graph.remove_edge(i, j)
 
+        pair_events = [t for t, _ in first_half_data_dict[i][j]]
         # Check if the residual graph has any isolated nodes (we don't check if the residual graph is connected or not)
-        if len(list(nx.isolates(first_half_graph))) != 0:
+        if min_time == min(pair_events) and max_time == max(pair_events):
+            first_half_graph.add_edge(i, j)
+        elif len(list(nx.isolates(first_half_graph))) != 0:
             first_half_graph.add_edge(i, j)
         else:
             sampled_pairs.append((i, j))
@@ -244,7 +263,6 @@ if completion_size:
     completion_pairs = sampled_pairs[validation_size:]
 
 # Set the completion and validation events
-first_half_data_dict = first_half_dataset.get_data_dict(weights=True)
 validation_events = [
     [e for e, _ in first_half_data_dict[pair[0]][pair[1]]]
     if pair[0] in first_half_data_dict and pair[1] in first_half_data_dict[pair[0]]
@@ -322,6 +340,27 @@ if completion_size:
             residual_states.pop(idx)
         else:
             idx += 1
+
+# Get the minimum and maximum of the residual times
+residual_times_min = min([min(times) for times in residual_times])
+residual_times_max = max([max(times) for times in residual_times])
+
+# The minimum time of validation or completion sets should not be smaller than the minimum time of the residual set
+if validation_size:
+    for pair, pair_times, pair_states in zip(validation_pairs, validation_events, validation_states):
+
+        min_idx = 0
+        for time in pair_times:
+            if time < residual_times_min:
+                min_idx += 1
+
+        max_idx = len(pair_times)
+        for time in reversed(pair_times):
+            if time > residual_times_max:
+                max_idx -= 1
+
+
+
 
 if verbose:
     print(f"\t+ Validation set has {validation_size} pairs.")

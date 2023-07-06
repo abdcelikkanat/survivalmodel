@@ -15,7 +15,7 @@ parser.add_argument(
     '--samples_folder', type=str, required=True, help='Path of the samples folder'
 )
 parser.add_argument(
-    '--max_sample_size', type=int, required=False, default=10000, help='Maximum sample size'
+    '--max_sample_size', type=int, required=False, default=1000, help='Maximum sample size'
 )
 parser.add_argument(
     '--seed', type=int, required=False, default=19, help='Seed value'
@@ -38,7 +38,7 @@ set_seed(seed=seed)
 
 # Read the train dataset
 dataset = Dataset()
-dataset.read_edge_list(split_folder + "/first_half.edges")
+dataset.read_edge_list(split_folder + "/residual.edges")
 dataset.print_info()
 init_time, last_time = dataset.get_init_time(), dataset.get_last_time()
 nodes_num = dataset.get_nodes_num()
@@ -117,7 +117,7 @@ def get_durations(data_dict, directed, nodes_num, init_time, last_time):
 
                     for idx, (time, state) in enumerate(time_state_list):
 
-                        # For the first event time
+                        # For the first event
                         if idx == 0:
 
                             # If the time is greater than the initial time, than add the duration [init_time, time]

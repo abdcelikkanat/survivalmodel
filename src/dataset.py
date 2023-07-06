@@ -1,5 +1,6 @@
 import re
 import torch
+import utils
 
 
 class Dataset:
@@ -234,9 +235,21 @@ class Dataset:
         """
         Print the dataset info
         """
+
+        min_count, max_count = utils.INF, -utils.INF
+        data_dict = self.get_data_dict(weights=True)
+        for i in data_dict:
+            for j in data_dict[i]:
+
+                min_count = min(min_count, len(data_dict[i][j]))
+                max_count = max(max_count, len(data_dict[i][j]))
+
         print(f"+ Dataset information")
         print(f"\t- Number of nodes: {self.__nodes_num}")
-        print(f"\t- Number of edges: {self.__edges.shape[1]}")
+        print(f"\t- Total number of events: {self.__edges.shape[1]}")
+        print(f"\t- Minimum number of events a pair has: {min_count}")
+        print(f"\t- Maximum number of events a pair has: {max_count}")
+        print(f"\t- Number of isolated nodes: {self.has_isolated_nodes()}")
         print(f"\t- Is directed: {self.__directed}")
         print(f"\t- Is signed: {self.__signed}")
         print(f"\t- Initial time: {self.__init_time}")
