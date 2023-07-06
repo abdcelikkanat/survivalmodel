@@ -106,6 +106,7 @@ for i in data_dict.keys():
         # Order the event times and states with respect to the time in the first and second half
         if len(first_half_times[-1]) != 0:
             first_half_times[-1], first_half_states[-1] = zip(*sorted(zip(first_half_times[-1], first_half_states[-1])))
+        if len(second_half_times[-1]) != 0:
             second_half_times[-1], second_half_states[-1] = zip(*sorted(zip(second_half_times[-1], second_half_states[-1])))
 
         # If the first half pair does not have any event but the second half contains any event,
