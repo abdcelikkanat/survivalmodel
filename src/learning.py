@@ -28,10 +28,10 @@ class LearningModel(BaseModel, torch.nn.Module):
                 torch.randn(size=(bins_num, nodes_num, dim), device=device), requires_grad=False
             ) if directed else None,
             beta_s=torch.nn.Parameter(
-                torch.randn(size=(2, ), device=device), requires_grad=False
+                torch.randn(size=(1, ), device=device), requires_grad=False
             ),
             beta_r=torch.nn.Parameter(
-                torch.randn(size=(2, ), device=device), requires_grad=False
+                torch.randn(size=(1, ), device=device), requires_grad=False
             ) if directed else None,
             prior_lambda=torch.as_tensor(
                 prior_lambda, dtype=torch.float, device=device

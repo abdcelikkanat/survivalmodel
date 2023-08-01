@@ -304,16 +304,17 @@ class BaseModel(torch.nn.Module):
         """
         Computes the sum of the beta elements for given pair and states
 
-        :param time_list: a vector of shape L
-        :param pairs: a vector of shape 2 x L
-        :param states: a vector of shape L
+        :param pair_states: a vector of shape L
         :return: A vector of shape L
         """
 
         beta_s = self.get_beta_s()
-        beta_r = self.get_beta_r() if self.is_directed() else beta_s
 
-        return beta_s[pair_states] + beta_r[pair_states]
+        if self.is_directed():
+            beta_r = self.get_beta_r()
+            return beta_s.expand(len(pair_states)) + beta_r.expand(len(pair_states))
+        else:
+            return beta_s.expand(len(pair_states))
 
     def get_delta_v(self, bin_indices: torch.Tensor, pairs: torch.Tensor, standardize: bool = True) -> torch.Tensor:
         """
@@ -596,9 +597,10 @@ class BaseModel(torch.nn.Module):
         ).sum()
 
         # Then compute the integral term
+        delta_mask = delta_t > 0
         integral_term = self.get_intensity_integral(
-            time_list=times[delta_t > 0], pairs=pairs[:, delta_t > 0],
-            delta_t=delta_t[delta_t > 0], states=states[delta_t > 0]
+            time_list=times[delta_mask], pairs=pairs[:, delta_mask],
+            delta_t=delta_t[delta_mask], states=states[delta_mask]
         ).sum()
 
         return -(non_integral_term - integral_term)
