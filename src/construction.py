@@ -11,6 +11,7 @@ class ConstructionModel(torch.nn.Module):
     def __init__(self, cluster_sizes: list, bins_num: int, dim: int, directed: bool, prior_lambda: float,
                  prior_sigma_s: float, prior_sigma_r: float, beta_s: list, beta_r: list,
                  prior_B_x0_s: float, prior_B_x0_r: float, prior_B_ls_s: float, prior_B_ls_r: float,
+                 max_time: int = 1000, min_time_diff: int = 10,
                  device: torch.device = "cpu", verbose: bool = False, seed: int = 0):
 
         super(ConstructionModel, self).__init__()
@@ -48,6 +49,10 @@ class ConstructionModel(torch.nn.Module):
             self.__prior_C_Q_s[sum(self.__cluster_sizes[:k]):sum(self.__cluster_sizes[:k + 1]), k] = 0
         self.__prior_C_Q_r = self.__prior_C_Q_s if self.__directed else None
 
+        # Set max time and min time difference
+        self.__max_time = max_time
+        self.__min_time_diff = min_time_diff
+
         # Set the device, verbose and seed
         self.__device = device
         self.__verbose = verbose
@@ -82,11 +87,46 @@ class ConstructionModel(torch.nn.Module):
         # edge_times = torch.as_tensor([0, 1000])
         # edge_states = torch.as_tensor([0, 1])
 
+        # Map the event times sampled from [0,1] to [0, T]
+        edge_times = (self.__max_time * torch.as_tensor(edge_times, device=self.__device)).to(torch.long).tolist()
+
+        # Remove the links/events/states if they are too close
+        data_dict = dict()
+        for idx, (edge, time, state) in enumerate(zip(edges, edge_times, edge_states)):
+
+            u, v = edge[0], edge[1]
+            if self.__directed is False:
+                u, v = v, u
+
+            if u in data_dict:
+                if v in data_dict[u]:
+                    data_dict[u][v].append((idx, time, state))
+                    # Check the previous state is different
+                    assert data_dict[u][v][-1][2] != data_dict[u][v][-2][2], "The consecutive states are the same!"
+                else:
+                    data_dict[u][v] = [(idx, time, state)]
+            else:
+                data_dict[u] = {v: [(idx, time, state)]}
+
+        remove_indices = []
+        for u in data_dict.keys():
+            for v in data_dict[u].keys():
+                data_dict[u][v] = sorted(data_dict[u][v], key=lambda item: item[1])
+                for k in range(1, len(data_dict[u][v])):
+                    if data_dict[u][v][k][1] - data_dict[u][v][k-1][1] < self.__min_time_diff:
+                        remove_indices.append(data_dict[u][v][k][0])
+                        remove_indices.append(data_dict[u][v][k-1][0])
+
+        for index in sorted(list(set(remove_indices)), reverse=True):
+            del edges[index]
+            del edge_times[index]
+            del edge_states[index]
+
         # Construct the dataset
         dataset = Dataset(
             nodes_num=self.__nodes_num,
             edges=torch.as_tensor(edges, dtype=torch.long, device=self.__device).T,
-            edge_times=((1. / utils.EPS) * torch.as_tensor(edge_times, device=self.__device)).to(torch.long),
+            edge_times=torch.as_tensor(edge_times, device=self.__device).to(torch.long),
             edge_weights=torch.as_tensor(edge_states, device=self.__device, dtype=torch.long),
             directed=self.__directed, signed=self.__signed
         )

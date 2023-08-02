@@ -37,10 +37,10 @@ class LearningModel(BaseModel, torch.nn.Module):
                 prior_lambda, dtype=torch.float, device=device
             ),
             prior_b_sigma_s=torch.nn.Parameter(
-                torch.ones(size=(bins_num+1, ), device=device), requires_grad=False
+                torch.ones(size=(bins_num, ), device=device), requires_grad=False
             ),
             prior_b_sigma_r=torch.nn.Parameter(
-                torch.ones(size=(bins_num + 1,), device=device), requires_grad=False
+                torch.ones(size=(bins_num, ), device=device), requires_grad=False
             ) if directed else None,
             prior_c_sigma_s=torch.nn.Parameter(
                 torch.ones(size=(nodes_num, ), device=device), requires_grad=False

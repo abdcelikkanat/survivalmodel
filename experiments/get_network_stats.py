@@ -22,7 +22,7 @@ def process(parser):
 
     # Load the dataset
     dataset = Dataset()
-    dataset.read_edgelist(edges_path)
+    dataset.read_edge_list(file_path=edges_path)
     dataset.print_info()
 
     if parser.output_path is not None:

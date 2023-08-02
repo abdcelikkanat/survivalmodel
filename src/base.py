@@ -311,9 +311,11 @@ class BaseModel(torch.nn.Module):
         """
 
         beta_s = self.get_beta_s()
-        beta_r = self.get_beta_r() if self.is_directed() else beta_s
-
-        return beta_s[pair_states] + beta_r[pair_states]
+        if self.is_directed():
+            beta_r = self.get_beta_r()
+            return beta_s[pair_states] + beta_r[pair_states]
+        else:
+            return beta_s[pair_states]
 
     def get_delta_v(self, bin_indices: torch.Tensor, pairs: torch.Tensor, standardize: bool = True) -> torch.Tensor:
         """
@@ -617,13 +619,9 @@ class BaseModel(torch.nn.Module):
         lambda_sq = self.get_prior_lambda()**2
 
         # Normalize and vectorize the initial position and velocity vectors
-        x0_s = torch.index_select(self.get_x0_s(), dim=0, index=nodes).flatten() 
         v_s = torch.index_select(self.get_v_s(),  dim=1, index=nodes).flatten()
-        x0v_s = torch.hstack((x0_s, v_s))
         if self.is_directed():
-            x0_r = torch.index_select(self.get_x0_r(), dim=0, index=nodes).flatten() 
             v_r = torch.index_select(self.get_v_r(),  dim=1, index=nodes).flatten()
-            x0v_r = torch.hstack((x0_r, v_r))
 
         # Compute the negative log-likelihood
         d_s = lambda_sq * torch.kron(
@@ -633,7 +631,7 @@ class BaseModel(torch.nn.Module):
                 torch.ones(self.get_dim(), device=self.get_device(), dtype=torch.float)
             )
         )
-        log_prior_s = -0.5*(final_dim*utils.LOG2PI+torch.log(d_s).sum()+(x0v_s**2 @ (1. / d_s)))
+        log_prior_s = -0.5*(final_dim*utils.LOG2PI+torch.log(d_s).sum()+(v_s**2 @ (1. / d_s)))
         if self.is_directed():
             d_r = lambda_sq * torch.kron(
                 torch.softmax(self.get_prior_b_sigma_r(), dim=0),
@@ -642,7 +640,7 @@ class BaseModel(torch.nn.Module):
                     torch.ones(self.get_dim(), device=self.get_device(), dtype=torch.float)
                 )
             )
-            log_prior_r = -0.5*(final_dim*utils.LOG2PI+torch.log(d_r).sum()+(x0v_r**2 @ (1. / d_r)))
+            log_prior_r = -0.5*(final_dim*utils.LOG2PI+torch.log(d_r).sum()+(v_r**2 @ (1. / d_r)))
 
         neg_log_prior = log_prior_s
         if self.is_directed():
