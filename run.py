@@ -17,9 +17,6 @@ def parse_arguments():
         '--model_path', type=str, required=True, help='Path of the model'
     )
     parser.add_argument(
-        '--mask_path', type=str, required=False, default=None, help='Path of the masked edge list file'
-    )
-    parser.add_argument(
         '--log_path', type=str, required=False, default=None, help='Path of the log file'
     )
     parser.add_argument(
@@ -74,13 +71,6 @@ def process(parser):
     # Check if the network is signed
     signed = dataset.is_signed()
 
-    # Read the masked pair file if exists
-    if parser.mask_path is not None:
-        masked_data = Dataset()
-        masked_data.read_edge_list(parser.mask_path, check_conditions=False)
-    else:
-        masked_data = parser.mask_path
-
     # Print the information of the dataset
     if parser.verbose:
         dataset.print_info()
@@ -93,7 +83,7 @@ def process(parser):
 
     # Learn the hyper-parameters
     lm.learn(
-        dataset=dataset, masked_data=masked_data, log_file_path=parser.log_path,
+        dataset=dataset, log_file_path=parser.log_path,
         lr=parser.lr, batch_size=parser.batch_size, epoch_num=parser.epoch_num, steps_per_epoch=parser.spe,
     )
     # Save the model

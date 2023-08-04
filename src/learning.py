@@ -63,7 +63,6 @@ class LearningModel(BaseModel, torch.nn.Module):
         self.__optimizer = torch.optim.Adam  # Optimizer
 
         # - The following parameters are set in the learn() method
-        self.__masked_pair_indices = None
         self.__min_time = None
         self.__max_time = None
         self.__lr = None  # Learning rate
@@ -104,7 +103,7 @@ class LearningModel(BaseModel, torch.nn.Module):
                     param.requires_grad = prior_grad
 
     def learn(self, dataset, lr: float = 0.1, batch_size: int = 0, epoch_num: int = 100, steps_per_epoch=1,
-              masked_data=None, log_file_path=None):
+              log_file_path=None):
         """
         Learn the model parameters
         :param dataset: The dataset
@@ -128,12 +127,6 @@ class LearningModel(BaseModel, torch.nn.Module):
         self.__batch_size = self.get_nodes_num() if batch_size == 0 else batch_size
         self.__epoch_num = epoch_num
         self.__steps_per_epoch = steps_per_epoch
-
-        # Select the masked pairs
-        self.__masked_pair_indices = utils.matIdx2flatIdx(
-            i=masked_data.get_edges(0), j=masked_data.get_edges(1), n=self.get_nodes_num(),
-            is_directed=self.is_directed(), dtype=torch.long
-        ).unique().to(self.get_device()) if masked_data is not None else None
 
         # Scale the edge times to [0, 1]
         edge_times = dataset.get_times()
@@ -268,23 +261,6 @@ class LearningModel(BaseModel, torch.nn.Module):
 
         # Sample a batch
         batch_nodes, expanded_pairs, expanded_times, expanded_states, event_states, is_edge, delta_t = bs.sample()
-
-        # Hide the masked edges
-        if self.__masked_pair_indices is not None:
-
-            expanded_pairs_idx = utils.matIdx2flatIdx(
-                i=expanded_pairs[0], j=expanded_pairs[1], n=self.get_nodes_num(), is_directed=self.is_directed()
-            )
-            unique_el, inverse_idx = torch.unique(expanded_pairs_idx, return_inverse=True)
-            selected_el = (unique_el.unsqueeze(1) == self.__masked_pair_indices).any(1)
-            selected_indices = selected_el[inverse_idx] == False
-
-            expanded_pairs = expanded_pairs[:, selected_indices]
-            expanded_times = expanded_times[selected_indices]
-            expanded_states = expanded_states[selected_indices]
-            event_states = event_states[selected_indices]
-            is_edge = is_edge[selected_indices]
-            delta_t = delta_t[selected_indices]
 
         # Finally, compute the negative log-likelihood and the negative log-prior for the batch
         batch_nll, batch_nlp = self.forward(
