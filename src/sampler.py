@@ -5,7 +5,7 @@ import utils
 class BatchSampler(torch.nn.Module):
     
     def __init__(self, edges: torch.LongTensor, edge_times: torch.FloatTensor, edge_states: torch.LongTensor,
-                 nodes_num: int, batch_size: int, directed: bool, bin_bounds: torch.FloatTensor,
+                 nodes_num: int, batch_size: int, directed: bool, bipartite: bool, bin_bounds: torch.FloatTensor,
                  device: torch.device = "cpu", seed: int = 19):
 
         super(BatchSampler, self).__init__()
@@ -18,11 +18,14 @@ class BatchSampler(torch.nn.Module):
         self.__nodes_num = nodes_num
         self.__batch_size = batch_size if batch_size > 0 else nodes_num
         self.__directed = directed
+        self.__bipartite = bipartite
+        self.__bipartite_set1 = torch.unique(self.__edges[0]).type(torch.long).to(device) if bipartite else None
+        self.__bipartite_set2 = torch.unique(self.__edges[1]).type(torch.long).to(device) if bipartite else None
         self.__device = device
 
         # Define the possible number of pairs
         self.__pairs_num = self.__nodes_num * (self.__nodes_num - 1)
-        if not self.__directed:
+        if not self.__directed and not self.__bipartite:
             self.__pairs_num = self.__pairs_num // 2
 
         # Convert the edges to flat indices
@@ -57,18 +60,39 @@ class BatchSampler(torch.nn.Module):
         Sample a batch of nodes and edges among them
         """
         # Sample the batch nodes
-        batch_nodes = torch.multinomial(
-            torch.arange(self.__nodes_num, dtype=torch.float, device=self.__device),
-            self.__batch_size, replacement=False
-        ).to(torch.long)
+        if self.__bipartite:
 
-        # Sort the nodes in order to obtain pairs (i,j) such that i < j
-        # Otherwise there might exist j > i pairs violating undirected case
-        batch_nodes = batch_nodes.sort()[0]
-        # Construct a matrix of shape 2x(Batch Size) storing the all possible batch node pairs
-        batch_pair_combin = torch.combinations(batch_nodes, with_replacement=False).T
-        if self.__directed:
-            batch_pair_combin = torch.hstack((batch_pair_combin, torch.flip(batch_pair_combin, dims=(0,))))
+            batch_nodes1 = torch.index_select(
+                self.__bipartite_set1, dim=0, index=torch.multinomial(
+                    torch.ones(size=(len(self.__bipartite_set1), ), device=self.__device),
+                    min(len(self.__bipartite_set1), self.__batch_size), replacement=False
+                )
+            )
+            batch_nodes2 = torch.index_select(
+                self.__bipartite_set2, dim=0, index=torch.multinomial(
+                    torch.ones(size=(len(self.__bipartite_set2), ), device=self.__device),
+                    min(len(self.__bipartite_set2), self.__batch_size), replacement=False
+                )
+            )
+
+            batch_pair_combin = torch.stack(torch.meshgrid(batch_nodes1, batch_nodes2)).T.reshape(2, -1)
+            # Sort the pairs to obtain (i,j) pairs such that i < j
+            batch_pair_combin = batch_pair_combin.sort(dim=0)[0]
+            batch_nodes = torch.hstack((self.__bipartite_set1, self.__bipartite_set2)).sort()[0]
+
+        else:
+            batch_nodes = torch.multinomial(
+                torch.ones(self.__nodes_num, dtype=torch.float, device=self.__device),
+                self.__batch_size, replacement=False
+            ).to(torch.long)
+
+            # Sort the nodes in order to obtain pairs (i,j) such that i < j
+            # Otherwise there might exist j > i pairs violating undirected case
+            batch_nodes = batch_nodes.sort()[0]
+            # Construct a matrix of shape 2x(Batch Size) storing the all possible batch node pairs
+            batch_pair_combin = torch.combinations(batch_nodes, with_replacement=False).T
+            if self.__directed:
+                batch_pair_combin = torch.hstack((batch_pair_combin, torch.flip(batch_pair_combin, dims=(0,))))
         # Convert the batch pairs in flat indices
         batch_flat_idx_combin = utils.matIdx2flatIdx(
             batch_pair_combin[0], batch_pair_combin[1], self.__nodes_num, self.__directed

@@ -9,7 +9,8 @@ from src.sampler import BatchSampler
 
 class LearningModel(BaseModel, torch.nn.Module):
 
-    def __init__(self, nodes_num: int, directed: bool, signed: bool, bins_num: int, dim: int, prior_lambda: float = 1e5,
+    def __init__(self, nodes_num: int, directed: bool, signed: bool,
+                 bins_num: int, dim: int, prior_lambda: float = 1e5,
                  device: torch.device = 'cpu', verbose: bool = False, seed: int = 19):
 
         utils.set_seed(seed)
@@ -54,6 +55,8 @@ class LearningModel(BaseModel, torch.nn.Module):
             verbose=verbose,
             seed=seed
         )
+
+        self.__bipartite = False  # Bipartite flag
 
         # Learning parameters
         self.__lp = "sequential"  # Learning procedure
@@ -102,6 +105,23 @@ class LearningModel(BaseModel, torch.nn.Module):
 
     def learn(self, dataset, lr: float = 0.1, batch_size: int = 0, epoch_num: int = 100, steps_per_epoch=1,
               masked_data=None, log_file_path=None):
+        """
+        Learn the model parameters
+        :param dataset: The dataset
+        :param lr: The learning rate
+        :param batch_size: The batch size
+        :param epoch_num: The number of epochs
+        :param steps_per_epoch: The number of steps per epoch
+        :param masked_data: The masked data
+        :param log_file_path: The log file path
+
+        It is worth noting that the model ignores the direction of the links
+        if the bipartite flag is set to True in the dataset object.
+
+        """
+
+        # Set if the model is bipartite
+        self.__bipartite = True if dataset.is_bipartite() else False
 
         # Set the learning parameters
         self.__lr = lr
@@ -126,7 +146,7 @@ class LearningModel(BaseModel, torch.nn.Module):
             edges=dataset.get_edges().to(self.get_device()), edge_times=edge_times.to(self.get_device()),
             edge_states=dataset.get_weights().to(self.get_device()),
             bin_bounds=self.get_bin_bounds(), nodes_num=self.get_nodes_num(), batch_size=self.__batch_size, 
-            directed=self.is_directed(), device=self.get_device(), seed=self.get_seed()
+            directed=self.is_directed(), bipartite=dataset.is_bipartite(), device=self.get_device(), seed=self.get_seed()
         )
 
         # Check the learning procedure
@@ -275,7 +295,7 @@ class LearningModel(BaseModel, torch.nn.Module):
         # Divide the batch loss by the number of all possible pairs
         average_batch_nll = batch_nll / float(self.__batch_size * (self.__batch_size - 1))
         average_batch_nlp = batch_nlp / float(self.__batch_size * (self.__batch_size - 1))
-        if not self.is_directed():
+        if not self.is_directed() and not self.__bipartite:
             average_batch_nll /= 2.
             average_batch_nlp /= 2.
 

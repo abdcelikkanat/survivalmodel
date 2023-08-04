@@ -7,8 +7,8 @@ class BaseModel(torch.nn.Module):
     Description
     '''
     def __init__(self, x0_s: torch.Tensor, v_s: torch.Tensor, beta_s: torch.Tensor,
-                 directed: bool = False, signed: bool = False, prior_lambda: float = 1.0,
-                 prior_b_sigma_s: torch.Tensor = None, prior_b_sigma_r: torch.Tensor = None,
+                 directed: bool = False, signed: bool = False,
+                 prior_lambda: float = 1.0, prior_b_sigma_s: torch.Tensor = None, prior_b_sigma_r: torch.Tensor = None,
                  x0_r: torch.Tensor = None, v_r: torch.Tensor = None, beta_r: torch.Tensor = None,
                  prior_c_sigma_s: torch.Tensor = None, prior_c_sigma_r: torch.Tensor = None,
                  device: torch.device = "cpu", verbose: bool = False, seed: int = 19):
@@ -27,7 +27,7 @@ class BaseModel(torch.nn.Module):
         self.__beta_s = beta_s
         self.__beta_r = beta_r
 
-        # Set the number of bins, directed and signed
+        # Set the number of bins, directed, and signed
         self.__bins_num = self.__v_s.shape[0]
         self.__directed = directed
         self.__signed = signed

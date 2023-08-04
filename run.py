@@ -17,9 +17,6 @@ def parse_arguments():
         '--model_path', type=str, required=True, help='Path of the model'
     )
     parser.add_argument(
-        '--init_model', type=str, required=False, default=None, help='Path of another model file for initialization'
-    )
-    parser.add_argument(
         '--mask_path', type=str, required=False, default=None, help='Path of the masked edge list file'
     )
     parser.add_argument(
@@ -32,7 +29,7 @@ def parse_arguments():
         '--dim', type=int, default=2, required=False, help='Dimension size'
     )
     parser.add_argument(
-        '--prior_lambda', type=float, default=1e6, required=False, help='Scaling coefficient of the covariance'
+        '--prior_lambda', type=float, default=1e10, required=False, help='Scaling coefficient of the covariance'
     )
     parser.add_argument(
         '--epoch_num', type=int, default=100, required=False, help='Number of epochs'
@@ -44,8 +41,13 @@ def parse_arguments():
         '--batch_size', type=int, default=0, required=False, help='Batch size'
     )
     parser.add_argument(
-        '--lr', type=float, default=0.01, required=False, help='Learning rate'
+        '--lr', type=float, default=0.1, required=False, help='Learning rate'
     )
+    parser.add_argument(
+        '--bipartite', action='store_true', help='Bipartite mode (default)'
+    )
+    parser.add_argument('--no-bipartite', dest='bipartite', action='store_false', help='Non-bipartite mode')
+    parser.set_defaults(bipartite=False)
     parser.add_argument(
         '--device', type=str, default="cuda", required=False, help='Device'
     )
@@ -62,7 +64,7 @@ def parse_arguments():
 def process(parser):
 
     # Load the dataset
-    dataset = Dataset()
+    dataset = Dataset(bipartite=parser.bipartite)
     dataset.read_edge_list(parser.edges)
 
     # Get the number of nodes
@@ -83,26 +85,11 @@ def process(parser):
     if parser.verbose:
         dataset.print_info()
 
-    # If the init model is not given, then train the model from scratch
-    if parser.init_model is None:
-
-        # Define the learning model
-        lm = LearningModel(
-            nodes_num=nodes_num, directed=directed, signed=signed, bins_num=parser.bins_num, dim=parser.dim,
-            prior_lambda=parser.prior_lambda, device=parser.device, verbose=parser.verbose, seed=parser.seed,
-        )
-
-    else:
-
-        # Load the model if exists
-        kwargs, lm_state = torch.load(parser.init_model, map_location=torch.device(parser.device))
-        # Update the arguments
-        kwargs['prior_lambda'] = parser.prior_lambda
-        kwargs['seed'], kwargs['device'], kwargs['verbose'] = parser.seed, parser.device, parser.verbose
-
-        # Load the model
-        lm = LearningModel(**kwargs)
-        lm.load_state_dict(lm_state)
+    # Define the learning model
+    lm = LearningModel(
+        nodes_num=nodes_num, directed=directed, signed=signed, bins_num=parser.bins_num, dim=parser.dim,
+        prior_lambda=parser.prior_lambda, device=parser.device, verbose=parser.verbose, seed=parser.seed,
+    )
 
     # Learn the hyper-parameters
     lm.learn(

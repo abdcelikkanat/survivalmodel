@@ -6,11 +6,12 @@ import utils
 class Dataset:
     """
     A class to read a temporal network dataset
-    Version 2.1
+    Version 2.2
     """
 
     def __init__(self, nodes_num=0, edges: torch.Tensor = None, edge_times: torch.Tensor = None,
-                 edge_weights: torch.Tensor = None, directed: bool = None, signed: bool = None, verbose=False):
+                 edge_weights: torch.Tensor = None, directed: bool = None, signed: bool = None, bipartite: bool = False,
+                 verbose=False):
 
         self.__nodes_num = nodes_num
         self.__edges = edges
@@ -18,6 +19,7 @@ class Dataset:
         self.__weights = edge_weights
         self.__directed = directed
         self.__signed = signed
+        self.__bipartite = bipartite
         self.__verbose = verbose
 
         # If the edge times are given, set the initial and last time
@@ -65,7 +67,7 @@ class Dataset:
                     edge_weights.append(float(tokens[3]))
 
                 # If the first node of the edge is greater than the second, the graph is directed
-                if edges[-1][0] > edges[-1][1]:
+                if edges[-1][0] > edges[-1][1] and not self.__bipartite:
                     self.__directed = True
 
                 # Check if the edge is a self loop
@@ -128,6 +130,13 @@ class Dataset:
         """
 
         return self.__signed
+
+    def is_bipartite(self):
+        """
+        Check if the graph is bipartite
+        """
+
+        return self.__bipartite
 
     def get_nodes_num(self) -> int:
         """
@@ -252,5 +261,6 @@ class Dataset:
         print(f"\t- Number of isolated nodes: {self.has_isolated_nodes()}")
         print(f"\t- Is directed: {self.__directed}")
         print(f"\t- Is signed: {self.__signed}")
+        print(f"\t- Is bipartite: {self.__bipartite}")
         print(f"\t- Initial time: {self.__init_time}")
         print(f"\t- Last time: {self.__last_time}")
