@@ -75,10 +75,10 @@ class BatchSampler(torch.nn.Module):
                 )
             )
 
-            batch_pair_combin = torch.stack(torch.meshgrid(batch_nodes1, batch_nodes2)).T.reshape(2, -1)
+            batch_pair_combin = torch.stack(torch.meshgrid(batch_nodes1, batch_nodes2)).reshape(2, -1)
             # Sort the pairs to obtain (i,j) pairs such that i < j
             batch_pair_combin = batch_pair_combin.sort(dim=0)[0]
-            batch_nodes = torch.hstack((self.__bipartite_set1, self.__bipartite_set2)).sort()[0]
+            batch_nodes = torch.hstack((batch_nodes1, batch_nodes2)).sort()[0]
 
         else:
             batch_nodes = torch.multinomial(
