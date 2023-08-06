@@ -83,7 +83,7 @@ def flatIdx2matIdx(idx, n, is_directed=False, dtype: torch.dtype = torch.long):
         # Because of the numerical issues, as a temporary solution, we use the following code
         if n > 3000:
 
-            rc = torch.index_select(torch.triu_indices(n, n, 1), dim=1, index=idx)
+            rc = torch.index_select(torch.triu_indices(n, n, 1, device=idx.device), dim=1, index=idx)
             r, c = rc[0], rc[1]
 
         else:
