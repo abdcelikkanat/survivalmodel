@@ -98,18 +98,26 @@ class BatchSampler(torch.nn.Module):
             batch_pair_combin[0], batch_pair_combin[1], self.__nodes_num, self.__directed
         )
 
-        # Construct a diagonal matrix of shape (pairs_num x pairs_num) to select batch edges
-        selection_mat = torch.sparse_coo_tensor(
-            indices=torch.vstack((batch_flat_idx_combin, batch_flat_idx_combin)),
-            values=torch.ones(len(batch_flat_idx_combin), dtype=torch.float, device=self.__device),
-            size=(self.__pairs_num, self.__pairs_num), device=self.__device
-        )
+        # Because of the memory issues, use an alternative approach for large graphs
+        if self.__nodes_num > 3000:
 
-        output = torch.sparse.mm(selection_mat, self.__edge_times_mat)
-        # Construct the batch edge times
-        batch_times = output.values()
-        # Construct the batch edge states
-        batch_states = torch.sparse.mm(selection_mat, self.__edge_states_mat).values()
+            output = torch.index_select(self.__edge_times_mat, 0, batch_flat_idx_combin).coalesce()
+            batch_times = output.values()
+            batch_states = torch.index_select(self.__edge_states_mat, 0, batch_flat_idx_combin).coalesce().values()
+
+        else:
+            # Construct a diagonal matrix of shape (pairs_num x pairs_num) to select batch edges
+            selection_mat = torch.sparse_coo_tensor(
+                indices=torch.vstack((batch_flat_idx_combin, batch_flat_idx_combin)),
+                values=torch.ones(len(batch_flat_idx_combin), dtype=torch.float, device=self.__device),
+                size=(self.__pairs_num, self.__pairs_num), device=self.__device
+            )
+
+            output = torch.sparse.mm(selection_mat, self.__edge_times_mat)
+            # Construct the batch edge times
+            batch_times = output.values()
+            # Construct the batch edge states
+            batch_states = torch.sparse.mm(selection_mat, self.__edge_states_mat).values()
 
         expanded_pairs, expanded_times, expanded_states, event_states, is_edge, delta_t = utils.expand_data(
             nodes_num=self.__nodes_num, directed=self.__directed, bin_bounds=self.__bin_bounds,
