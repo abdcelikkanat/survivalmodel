@@ -25,7 +25,7 @@ class BatchSampler(torch.nn.Module):
 
         # Define the possible number of pairs
         self.__pairs_num = self.__nodes_num * (self.__nodes_num - 1)
-        if not self.__directed and not self.__bipartite:
+        if not self.__directed:
             self.__pairs_num = self.__pairs_num // 2
 
         # Convert the edges to flat indices

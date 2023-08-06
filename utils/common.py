@@ -80,9 +80,16 @@ def flatIdx2matIdx(idx, n, is_directed=False, dtype: torch.dtype = torch.long):
         return torch.vstack((row_idx, col_idx)).to(dtype)
 
     else:
+        # Because of the numerical issues, as a temporary solution, we use the following code
+        if n > 3000:
 
-        r = torch.ceil(n - 1 - 0.5 - torch.sqrt(n ** 2 - n - 2 * idx - 1.75)).type(dtype)
-        c = idx - r * n + ((r + 1) * (r + 2)) // 2
+            rc = torch.index_select(torch.triu_indices(n, n, 1), dim=1, index=idx)
+            r, c = rc[0], rc[1]
+
+        else:
+
+            r = torch.ceil(n - 1 - 0.5 - torch.sqrt(n ** 2 - n - 2 * idx - 1.75)).type(dtype)
+            c = idx - r * n + ((r + 1) * (r + 2)) // 2
 
         return torch.vstack((r.type(dtype), c.type(dtype)))
 
